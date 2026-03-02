@@ -1,0 +1,44 @@
+{
+  "name": "elookup-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@chakra-ui/icons": "^1.1.7",
+    "@chakra-ui/react": "^2.8.2",
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
+    "@fontsource/open-sans": "^5.0.20",
+    "@fontsource/raleway": "^5.0.18",
+    "@fontsource/roboto": "^5.0.15",
+    "apexcharts": "^4.7.0",
+    "axios": "^1.7.7",
+    "clsx": "^2.1.1",
+    "framer-motion": "^11.0.0",
+    "jwt-decode": "^4.0.0",
+    "react": "^18.3.1",
+    "react-apexcharts": "^1.9.0",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.0.1",
+    "react-router-dom": "^6.26.2",
+    "reactflow": "^11.11.4",
+    "dagre": "^0.8.5",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.10",
+    "vite": "^5.4.8"
+  }
+}
