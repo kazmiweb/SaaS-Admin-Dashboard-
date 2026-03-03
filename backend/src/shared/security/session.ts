@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { nanoid } from "nanoid";
-import { getRedis } from "../redis.js";
+import { redis } from "../redis.js";
 
 export type SessionData = {
   id: string;
@@ -40,7 +40,7 @@ function setCookie(res: Response, sid: string | null) {
 }
 
 export async function createSession(res: Response, userId: string, role: SessionData["role"]) {
-  const redis = getRedis();
+  const r = redis;
   const id = nanoid(32);
   const key = `${PREFIX}${id}`;
   const value: SessionData = { id, userId, role };
@@ -52,7 +52,6 @@ export async function createSession(res: Response, userId: string, role: Session
 export async function destroySession(req: Request, res: Response) {
   const sid = (req as any).session?.id as string | undefined;
   if (sid) {
-    const redis = getRedis();
     await redis.del(`${PREFIX}${sid}`);
   }
   setCookie(res, null);
@@ -65,7 +64,6 @@ export function sessionReader() {
       const cookies = parseCookies(req.headers.cookie);
       const sid = cookies[COOKIE_NAME];
       if (!sid) return next();
-      const redis = getRedis();
       const raw = await redis.get(`${PREFIX}${sid}`);
       if (!raw) return next();
       const session = JSON.parse(raw) as SessionData;

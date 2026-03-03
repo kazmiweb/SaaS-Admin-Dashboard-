@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { ZodError } from "zod";
 
 export class HttpError extends Error {
   status: number;
@@ -15,9 +16,19 @@ export function notFound(_req: Request, _res: Response, next: NextFunction) {
 }
 
 export function errorHandler(err: any, _req: Request, res: Response, _next: NextFunction) {
+  // Zod validation errors -> 400
+  if (err instanceof ZodError) {
+    return res.status(400).json({
+      status: "error",
+      code: "VALIDATION_ERROR",
+      message: "Invalid request",
+      issues: err.issues
+    });
+  }
+
   const status = err?.status ?? 500;
   const code = err?.code ?? "INTERNAL_ERROR";
   const message = status === 500 ? "Server error" : (err?.message ?? "Error");
   if (status === 500) console.error(err);
-  res.status(status).json({ status: "error", code, message });
+  return res.status(status).json({ status: "error", code, message });
 }

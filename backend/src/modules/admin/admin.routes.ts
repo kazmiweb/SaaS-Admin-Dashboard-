@@ -350,7 +350,7 @@ adminRouter.get("/top-users", async (_req: Request, res: Response) => {
   const grouped = await prisma.searchHistory.groupBy({
     by: ["userId"],
     _count: { _all: true },
-    orderBy: { _count: { _all: "desc" } },
+    orderBy: { _count: { id: "desc" } },
     take: 5
   });
   const users = await prisma.user.findMany({
@@ -362,7 +362,7 @@ adminRouter.get("/top-users", async (_req: Request, res: Response) => {
     status: "success",
     items: grouped.map(g => ({
       user: byId.get(g.userId),
-      searches: g._count._all
+      searches: ((g._count && (g._count as any).id) ?? 0)
     }))
   });
 });

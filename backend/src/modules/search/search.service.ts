@@ -2,7 +2,7 @@ import { prisma } from "../../shared/prisma.js";
 import { HttpError } from "../../shared/http/errors.js";
 import { detectQuery } from "./detect.js";
 import { runApiCall } from "./runApiCall.js";
-import { getRedis } from "../../shared/redis.js";
+import { redis } from "../../shared/redis.js";
 import { syncExpiredCredits } from "../../shared/security/expiry.js";
 
 export type Role = "ADMIN" | "RESELLER" | "USER";
@@ -110,7 +110,7 @@ export async function runServiceSearch(params: {
     throw new HttpError(402, "INSUFFICIENT_CREDITS", `Insufficient credits. Required: ${totalCost}, you have: ${user.credits}`);
   }
 
-  const redis = getRedis();
+  const redisClient = redis;
   const ttlSec = Number(process.env.SEARCH_CACHE_TTL_SEC ?? 180);
   const maxConcurrency = Math.max(1, Math.min(12, Number(process.env.SEARCH_MAX_CONCURRENCY ?? 5)));
   const limit = pLimit(maxConcurrency);
@@ -128,7 +128,7 @@ export async function runServiceSearch(params: {
         limit(async () => {
           const cacheKey = `api:${apiCfg.id}:q:${detected.normalized}`;
           try {
-            const cached = ttlSec > 0 ? await redis.get(cacheKey) : null;
+            const cached = ttlSec > 0 ? await redisClient.get(cacheKey) : null;
             if (cached) {
               results.push({ apiId: apiCfg.id, apiName: apiCfg.name, ok: true, data: JSON.parse(cached), cached: true });
               successCount += 1;
@@ -140,7 +140,7 @@ export async function runServiceSearch(params: {
             successCount += 1;
 
             if (ttlSec > 0) {
-              await redis.set(cacheKey, JSON.stringify(r.data), "EX", ttlSec);
+              await redisClient.set(cacheKey, JSON.stringify(r.data), "EX", ttlSec);
             }
           } catch (e: any) {
             results.push({ apiId: apiCfg.id, apiName: apiCfg.name, ok: false, error: e?.message ?? "API error" });
