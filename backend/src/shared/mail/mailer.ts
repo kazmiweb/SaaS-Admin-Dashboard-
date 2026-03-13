@@ -81,18 +81,21 @@ export async function sendSupportTicketEmail(input: {
   message: string;
   fromEmail?: string | null;
   fromName?: string | null;
+  fromPhone?: string | null;
 }) {
   const recipients = resolveSupportRecipients();
   if (!recipients.length) return;
 
   const from = resolveMailFrom();
-  const senderLine = [input.fromName, input.fromEmail].filter(Boolean).join(" <") + (input.fromEmail ? ">" : "");
-  const safeSender = senderLine.trim() || "Dashboard user";
+  const senderLabel = [input.fromName, input.fromEmail].filter(Boolean).join(" <") + (input.fromEmail ? ">" : "");
+  const safeSender = senderLabel.trim() || "Dashboard user";
+  const safePhone = (input.fromPhone ?? "").trim();
 
   const text = [
     `Complaint Token: ${input.ticketToken}`,
     `Subject: ${input.subject}`,
     `Sender: ${safeSender}`,
+    `Phone: ${safePhone || "Not provided"}`,
     "",
     input.message,
   ].join("\n");
@@ -103,6 +106,7 @@ export async function sendSupportTicketEmail(input: {
       <p style="color:#475569;margin:10px 0 0 0"><strong>Token:</strong> ${input.ticketToken}</p>
       <p style="color:#475569;margin:4px 0 0 0"><strong>Subject:</strong> ${input.subject}</p>
       <p style="color:#475569;margin:4px 0 12px 0"><strong>Sender:</strong> ${safeSender}</p>
+      <p style="color:#475569;margin:4px 0 12px 0"><strong>Phone:</strong> ${safePhone || "Not provided"}</p>
       <div style="padding:12px;border-radius:10px;border:1px solid #cbd5e1;background:#f8fafc;white-space:pre-wrap">${input.message}</div>
     </div>`;
 

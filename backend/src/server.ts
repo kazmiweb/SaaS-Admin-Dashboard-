@@ -83,8 +83,6 @@ app.use("/me", meRouter);
 app.use("/admin", adminRouter);
 app.use("/reseller", resellerRouter);
 app.use("/search", searchRouter);
-app.use("/api/search", searchRouter);
-app.use("/api", apiRouter);
 app.use("/export", exportRouter);
 app.use("/support", supportRouter);
 
@@ -93,8 +91,10 @@ app.use("/api/auth", authRouter);
 app.use("/api/me", meRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/reseller", resellerRouter);
+app.use("/api/search", searchRouter);
 app.use("/api/export", exportRouter);
 app.use("/api/support", supportRouter);
+app.use("/api", apiRouter);
 
 app.use(notFound);
 app.use(errorHandler);

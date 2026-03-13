@@ -25,6 +25,7 @@ type SupportMeta = {
   priority: string;
   contactEmail?: string;
   contactName?: string;
+  contactPhone?: string;
   threadOwnerId?: string | null;
   assignedAdminId?: string | null;
 };
@@ -44,6 +45,7 @@ export const supportRouter = Router();
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   email: z.string().trim().email().max(255).optional(),
+  phone: z.string().trim().min(7).max(30).optional(),
   subject: z.string().trim().min(2).max(140).optional(),
   category: z.string().trim().min(2).max(40).optional(),
   source: z.string().trim().min(2).max(40).optional(),
@@ -94,6 +96,7 @@ function parseMeta(value: Prisma.JsonValue | null): SupportMeta | null {
     priority,
     contactEmail: typeof candidate.contactEmail === "string" ? candidate.contactEmail : undefined,
     contactName: typeof candidate.contactName === "string" ? candidate.contactName : undefined,
+    contactPhone: typeof candidate.contactPhone === "string" ? candidate.contactPhone : undefined,
     threadOwnerId: typeof candidate.threadOwnerId === "string" || candidate.threadOwnerId === null ? candidate.threadOwnerId : undefined,
     assignedAdminId: typeof candidate.assignedAdminId === "string" || candidate.assignedAdminId === null ? candidate.assignedAdminId : undefined,
   };
@@ -110,6 +113,7 @@ function buildMeta(input: {
   priority: string;
   contactEmail?: string;
   contactName?: string;
+  contactPhone?: string;
   threadOwnerId?: string | null;
   assignedAdminId?: string | null;
 }): Prisma.InputJsonValue {
@@ -125,6 +129,7 @@ function buildMeta(input: {
     priority: input.priority,
     ...(input.contactEmail ? { contactEmail: input.contactEmail } : {}),
     ...(input.contactName ? { contactName: input.contactName } : {}),
+    ...(input.contactPhone ? { contactPhone: input.contactPhone } : {}),
     ...(input.threadOwnerId !== undefined ? { threadOwnerId: input.threadOwnerId } : {}),
     ...(input.assignedAdminId !== undefined ? { assignedAdminId: input.assignedAdminId } : {}),
   };
@@ -185,6 +190,7 @@ async function issueMessage(input: {
   body: string;
   contactEmail?: string;
   contactName?: string;
+  contactPhone?: string;
   threadOwnerId?: string | null;
   assignedAdminId?: string | null;
 }) {
@@ -205,6 +211,7 @@ async function issueMessage(input: {
     priority: input.priority,
     contactEmail: input.contactEmail,
     contactName: input.contactName,
+    contactPhone: input.contactPhone,
     threadOwnerId: input.threadOwnerId,
     assignedAdminId: input.assignedAdminId,
   });
@@ -286,6 +293,7 @@ function buildTicketSummaryFromRows(rows: Notification[], unreadCount: number) {
     source: latestMeta.source,
     contactEmail: latestMeta.contactEmail ?? null,
     contactName: latestMeta.contactName ?? null,
+    contactPhone: latestMeta.contactPhone ?? null,
     lastMessageAt: latestRow.createdAt,
     lastMessagePreview: compactText(latestRow.message, 160),
     messageCount: dedupeMessages(rows).length,
@@ -372,7 +380,11 @@ supportRouter.post("/contact", async (req: Request, res: Response) => {
   }
 
   const contactEmail = (body.email ?? actorUser?.email ?? "").trim().toLowerCase();
+  const contactPhone = (body.phone ?? "").replace(/\s+/g, " ").trim() || undefined;
   const contactName = (body.name ?? actorUser?.name ?? "").trim() || undefined;
+  if (!actorUser && !contactEmail) {
+    throw new HttpError(400, "BAD_REQUEST", "Email is required for public contact requests");
+  }
   const ownerUser = !actorUser && contactEmail
     ? await prisma.user.findUnique({ where: { email: contactEmail }, select: { id: true } })
     : null;
@@ -398,6 +410,7 @@ supportRouter.post("/contact", async (req: Request, res: Response) => {
     body: messageText,
     contactEmail: contactEmail || undefined,
     contactName,
+    contactPhone,
     threadOwnerId,
     assignedAdminId: null,
   });
@@ -409,6 +422,7 @@ supportRouter.post("/contact", async (req: Request, res: Response) => {
       message: messageText,
       fromEmail: contactEmail || undefined,
       fromName: contactName,
+      fromPhone: contactPhone,
     }).catch(() => void 0);
   }
 
@@ -424,6 +438,7 @@ supportRouter.post("/contact", async (req: Request, res: Response) => {
       source: body.source ?? (actor ? "dashboard" : "login"),
       contactEmail: contactEmail || null,
       contactName: contactName ?? null,
+      contactPhone: contactPhone ?? null,
       lastMessageAt: new Date(),
       lastMessagePreview: compactText(messageText, 160),
       messageCount: 1,
@@ -453,6 +468,7 @@ supportRouter.get("/public/:token/messages", async (req: Request, res: Response)
       source: snapshot.meta.source,
       contactEmail: snapshot.meta.contactEmail ?? null,
       contactName: snapshot.meta.contactName ?? null,
+      contactPhone: snapshot.meta.contactPhone ?? null,
       createdAt: snapshot.rows[0]?.createdAt,
     },
     messages: snapshot.messages,
@@ -466,6 +482,7 @@ supportRouter.post("/public/:token/messages", async (req: Request, res: Response
       email: z.string().trim().email().max(255),
       message: z.string().trim().min(1).max(5000),
       name: z.string().trim().min(1).max(120).optional(),
+      phone: z.string().trim().min(7).max(30).optional(),
     })
     .parse(req.body ?? {});
 
@@ -492,6 +509,7 @@ supportRouter.post("/public/:token/messages", async (req: Request, res: Response
     body: body.message,
     contactEmail: body.email.toLowerCase(),
     contactName: body.name ?? snapshot.meta.contactName,
+    contactPhone: body.phone ?? snapshot.meta.contactPhone,
     threadOwnerId,
     assignedAdminId: snapshot.meta.assignedAdminId,
   });
@@ -502,6 +520,7 @@ supportRouter.post("/public/:token/messages", async (req: Request, res: Response
     message: body.message,
     fromEmail: body.email,
     fromName: body.name,
+    fromPhone: body.phone ?? snapshot.meta.contactPhone,
   }).catch(() => void 0);
 
   res.status(201).json({ status: "success", message: created });
@@ -553,6 +572,7 @@ supportRouter.get("/tickets/:id/messages", requireAuth, async (req: Request, res
       source: latest.source,
       contactEmail: latest.contactEmail ?? null,
       contactName: latest.contactName ?? null,
+      contactPhone: latest.contactPhone ?? null,
       lastMessageAt: rows[rows.length - 1]?.createdAt,
       lastMessagePreview: compactText(rows[rows.length - 1]?.message ?? "", 160),
       messageCount: messages.length,
@@ -596,6 +616,7 @@ supportRouter.post("/tickets/:id/messages", requireAuth, async (req: Request, re
     body: body.message,
     contactEmail: snapshot.meta.contactEmail,
     contactName: snapshot.meta.contactName,
+    contactPhone: snapshot.meta.contactPhone,
     threadOwnerId,
     assignedAdminId: senderType === "ADMIN" ? actor.sub : snapshot.meta.assignedAdminId,
   });
@@ -607,6 +628,7 @@ supportRouter.post("/tickets/:id/messages", requireAuth, async (req: Request, re
       message: body.message,
       fromEmail: snapshot.meta.contactEmail,
       fromName: snapshot.meta.contactName,
+      fromPhone: snapshot.meta.contactPhone,
     }).catch(() => void 0);
   }
 
@@ -627,7 +649,7 @@ supportRouter.get("/admin/tickets", requireAuth, requireRole("ADMIN"), async (re
   if (query.search) {
     const needle = query.search.toLowerCase();
     items = items.filter((item) =>
-      [item.token, item.subject, item.contactEmail, item.contactName, item.lastMessagePreview]
+      [item.token, item.subject, item.contactEmail, item.contactName, item.contactPhone, item.lastMessagePreview]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -670,6 +692,7 @@ supportRouter.patch("/admin/tickets/:id/status", requireAuth, requireRole("ADMIN
     body: `Ticket status changed to ${body.status.replace("_", " ")}`,
     contactEmail: snapshot.meta.contactEmail,
     contactName: snapshot.meta.contactName,
+    contactPhone: snapshot.meta.contactPhone,
     threadOwnerId,
     assignedAdminId: actor.sub,
   });

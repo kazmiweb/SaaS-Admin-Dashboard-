@@ -1,11 +1,17 @@
 import React, { useState } from "react";
+import ChatRoundedIcon from "@mui/icons-material/ChatRounded";
+import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import TelegramIcon from "@mui/icons-material/Telegram";
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Link as MuiLink,
   Stack,
@@ -25,17 +31,30 @@ type PublicSupportMessage = {
   createdAt: string;
 };
 
+const QUICK_TEMPLATES = [
+  "I need login access. Please help me register my account.",
+  "My device is locked. Please reset my device binding.",
+  "Please share your latest pricing and subscription rates.",
+  "Open chat support",
+] as const;
+
 export default function Login() {
   const nav = useNavigate();
+  const telegramUrl = import.meta.env.VITE_TELEGRAM_URL || "https://t.me/elookup_support";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
   const [showReset, setShowReset] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
   const [resetEmail, setResetEmail] = useState("");
+
+  const [chatOpen, setChatOpen] = useState(false);
   const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
   const [contactToken, setContactToken] = useState<string | null>(null);
@@ -61,7 +80,7 @@ export default function Login() {
       if (code === "DEVICE_MISMATCH") {
         setShowReset(true);
         setResetEmail(email);
-        setErr(ex?.response?.data?.message ?? "This account is bound to another device.");
+        setErr(ex?.response?.data?.message ?? "This account is currently bound to another device.");
       } else {
         setErr(ex?.response?.data?.message ?? "Login failed");
       }
@@ -102,7 +121,7 @@ export default function Login() {
       });
       setContactThread(res.data?.messages ?? []);
     } catch {
-      // keep silent during polling
+      // Silent polling failure handling
     }
   }
 
@@ -118,8 +137,9 @@ export default function Login() {
       if (!contactToken) {
         const res = await api.post("/support/contact", {
           name: contactName.trim() || undefined,
+          phone: contactPhone.trim() || undefined,
           email: contactEmail.trim(),
-          subject: "Login page support request",
+          subject: "Login access support request",
           source: "login",
           message: contactMessage.trim(),
         });
@@ -132,6 +152,7 @@ export default function Login() {
       } else {
         await api.post(`/support/public/${encodeURIComponent(contactToken)}/messages`, {
           name: contactName.trim() || undefined,
+          phone: contactPhone.trim() || undefined,
           email: contactEmail.trim(),
           message: contactMessage.trim(),
         });
@@ -146,13 +167,18 @@ export default function Login() {
   }
 
   React.useEffect(() => {
-    if (!contactToken || !contactEmail.trim()) return;
+    if (!chatOpen || !contactToken || !contactEmail.trim()) return;
     loadSupportThread(contactToken, contactEmail.trim()).catch(() => void 0);
     const timer = window.setInterval(() => {
       loadSupportThread(contactToken, contactEmail.trim()).catch(() => void 0);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [contactToken, contactEmail]);
+  }, [chatOpen, contactToken, contactEmail]);
+
+  function openChat() {
+    setContactEmail((prev) => prev || email);
+    setChatOpen(true);
+  }
 
   return (
     <Box
@@ -160,261 +186,260 @@ export default function Login() {
         minHeight: "100vh",
         display: "flex",
         alignItems: "center",
+        justifyContent: "center",
         px: { xs: 2, md: 4 },
         py: { xs: 4, md: 6 },
         background:
           "radial-gradient(circle at top left, rgba(37,99,235,0.22), transparent 28%), radial-gradient(circle at bottom right, rgba(20,184,166,0.2), transparent 24%), linear-gradient(135deg, #071120 0%, #0f172a 46%, #134e4a 100%)",
       }}
     >
-      <Grid container spacing={4} alignItems="center" justifyContent="center">
-        <Grid item xs={12} lg={5}>
-          <Stack spacing={2.5} sx={{ maxWidth: 560, color: "common.white" }}>
-            <Chip
-              label="Secure Access"
-              sx={{
-                alignSelf: "flex-start",
-                bgcolor: "rgba(255,255,255,0.08)",
-                color: "common.white",
-                borderRadius: 999,
-                fontWeight: 800,
-              }}
-            />
-            <Typography variant="h3" sx={{ fontWeight: 900, lineHeight: 1.05 }}>
-              Sign in to the unified Elookup control center.
-            </Typography>
-            <Typography sx={{ color: "rgba(255,255,255,0.72)", maxWidth: 520 }}>
-              Admin, reseller, and user dashboards all continue to use the current backend auth flow, existing sessions, and device-bound account controls.
-            </Typography>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} pt={1}>
-              <FeaturePill label="Role-based redirect" />
-              <FeaturePill label="OTP device reset" />
-              <FeaturePill label="Backend-compatible" />
-            </Stack>
-          </Stack>
-        </Grid>
+      <Grid container justifyContent="center">
+        <Grid item xs={12} sm={10} md={7} lg={4.5}>
+          <Card
+            sx={{
+              borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.08)",
+              bgcolor: "rgba(9,16,32,0.9)",
+              backdropFilter: "blur(14px)",
+              boxShadow: "0 24px 90px rgba(0,0,0,0.28)",
+            }}
+          >
+            <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+              <Stack spacing={2.5} textAlign="center">
+                <Box>
+                  <Typography variant="h4" sx={{ fontWeight: 900 }}>
+                    Login
+                  </Typography>
+                  <Typography color="text.secondary" sx={{ mt: 0.6 }}>
+                    Use your existing account credentials. Access is routed by backend role.
+                  </Typography>
+                </Box>
 
-        <Grid item xs={12} md={10} lg={4}>
-          <Stack spacing={2.2}>
-            <Card
-              sx={{
-                borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.08)",
-                bgcolor: "rgba(9,16,32,0.88)",
-                backdropFilter: "blur(14px)",
-                boxShadow: "0 24px 90px rgba(0,0,0,0.28)",
-              }}
-            >
-              <CardContent sx={{ p: { xs: 3, md: 4 } }}>
-                <Stack spacing={3}>
-                  <Box>
-                    <Typography variant="h4" sx={{ fontWeight: 900 }}>
-                      Login
-                    </Typography>
-                    <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-                      Use your existing account credentials. Access is routed by the backend role.
-                    </Typography>
-                  </Box>
+                {err ? <Alert severity="error">{err}</Alert> : null}
 
-                  {err ? <Alert severity="error">{err}</Alert> : null}
+                {showReset ? (
+                  <Stack spacing={2.2} textAlign="left">
+                    <Box>
+                      <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                        Reset bound device
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                        Send OTP to your registered email, then verify to replace the current device.
+                      </Typography>
+                    </Box>
 
-                  {showReset ? (
-                    <Stack spacing={2.5}>
-                      <Box>
-                        <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                          Reset bound device
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          Send an OTP to your registered email, then verify it to replace the device binding.
-                        </Typography>
-                      </Box>
+                    <TextField
+                      label="Email"
+                      type="email"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      fullWidth
+                    />
 
+                    {otpSent ? (
+                      <TextField
+                        label="6-digit OTP"
+                        value={otp}
+                        onChange={(e) => setOtp(e.target.value)}
+                        fullWidth
+                      />
+                    ) : null}
+
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.4}>
+                      {!otpSent ? (
+                        <Button variant="contained" onClick={sendResetOtp} fullWidth>
+                          Send OTP
+                        </Button>
+                      ) : (
+                        <Button variant="contained" onClick={verifyResetOtp} fullWidth>
+                          Verify and reset
+                        </Button>
+                      )}
+                      <Button
+                        variant="outlined"
+                        color="inherit"
+                        onClick={() => {
+                          setShowReset(false);
+                          setOtpSent(false);
+                          setOtp("");
+                        }}
+                        fullWidth
+                      >
+                        Cancel
+                      </Button>
+                    </Stack>
+                  </Stack>
+                ) : (
+                  <Box component="form" onSubmit={submit}>
+                    <Stack spacing={2.2}>
                       <TextField
                         label="Email"
                         type="email"
-                        value={resetEmail}
-                        onChange={(e) => setResetEmail(e.target.value)}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        autoComplete="email"
                         fullWidth
                       />
-
-                      {otpSent ? (
-                        <TextField
-                          label="6-digit OTP"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value)}
-                          fullWidth
-                        />
-                      ) : null}
-
-                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-                        {!otpSent ? (
-                          <Button variant="contained" onClick={sendResetOtp} fullWidth>
-                            Send OTP
-                          </Button>
-                        ) : (
-                          <Button variant="contained" onClick={verifyResetOtp} fullWidth>
-                            Verify and reset
-                          </Button>
-                        )}
-                        <Button
-                          variant="outlined"
-                          color="inherit"
-                          onClick={() => {
-                            setShowReset(false);
-                            setOtpSent(false);
-                            setOtp("");
-                          }}
-                          fullWidth
-                        >
-                          Cancel
-                        </Button>
-                      </Stack>
+                      <TextField
+                        label="Password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="current-password"
+                        fullWidth
+                      />
+                      <Button type="submit" variant="contained" size="large" disabled={busy} fullWidth>
+                        {busy ? "Signing in..." : "Login"}
+                      </Button>
                     </Stack>
-                  ) : (
-                    <Box component="form" onSubmit={submit}>
-                      <Stack spacing={2.5}>
-                        <TextField
-                          label="Email"
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          autoComplete="email"
-                          fullWidth
-                        />
-                        <TextField
-                          label="Password"
-                          type="password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          autoComplete="current-password"
-                          fullWidth
-                        />
-                        <Button type="submit" variant="contained" size="large" disabled={busy} fullWidth>
-                          {busy ? "Signing in..." : "Login"}
-                        </Button>
-                      </Stack>
-                    </Box>
-                  )}
-
-                  <Divider />
-
-                  <Typography variant="body2" color="text.secondary" textAlign="center">
-                    New user?{" "}
-                    <MuiLink component={Link} to="/signup" underline="hover">
-                      Create account
-                    </MuiLink>
-                  </Typography>
-                </Stack>
-              </CardContent>
-            </Card>
-
-            <Card
-              sx={{
-                borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.08)",
-                bgcolor: "rgba(9,16,32,0.88)",
-                backdropFilter: "blur(14px)",
-              }}
-            >
-              <CardContent sx={{ p: { xs: 2.2, md: 2.8 } }}>
-                <Stack spacing={1.5}>
-                  <Box>
-                    <Typography variant="h6" sx={{ fontWeight: 900 }}>
-                      Contact Admin Live Chat
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Complaint token auto-generated. Replies refresh every 5 seconds.
-                    </Typography>
                   </Box>
+                )}
 
-                  {contactErr ? <Alert severity="error">{contactErr}</Alert> : null}
-                  {contactToken ? <Alert severity="success">Ticket Token: {contactToken}</Alert> : null}
+                <Divider />
 
-                  <TextField
-                    label="Name (optional)"
-                    value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
-                    size="small"
+                <Typography variant="body2" color="text.secondary">
+                  New user?{" "}
+                  <MuiLink component={Link} to="/signup" underline="hover">
+                    Create account
+                  </MuiLink>
+                </Typography>
+
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} pt={0.5}>
+                  <Button
+                    variant="outlined"
+                    color="inherit"
                     fullWidth
-                  />
-                  <TextField
-                    label="Email"
-                    type="email"
-                    value={contactEmail}
-                    onChange={(e) => setContactEmail(e.target.value)}
-                    size="small"
-                    fullWidth
-                  />
-                  <TextField
-                    label="Message"
-                    value={contactMessage}
-                    onChange={(e) => setContactMessage(e.target.value)}
-                    size="small"
-                    multiline
-                    minRows={2}
-                    fullWidth
-                  />
-
-                  <Button variant="contained" onClick={sendSupportMessage} disabled={contactBusy}>
-                    {contactBusy ? "Sending..." : contactToken ? "Send Reply" : "Start Chat"}
-                  </Button>
-
-                  <Box
-                    sx={{
-                      maxHeight: 180,
-                      overflowY: "auto",
-                      borderRadius: 2,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      px: 1,
-                      py: 1,
-                      backgroundColor: "rgba(2, 6, 23, 0.38)",
-                    }}
+                    startIcon={<ChatRoundedIcon />}
+                    onClick={openChat}
                   >
-                    {contactThread.length ? (
-                      <Stack spacing={1}>
-                        {contactThread.map((item) => (
-                          <Box
-                            key={item.id}
-                            sx={{
-                              p: 1,
-                              borderRadius: 1.5,
-                              backgroundColor: item.senderType === "ADMIN" ? "rgba(20,184,166,0.14)" : "rgba(37,99,235,0.14)",
-                            }}
-                          >
-                            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.74)" }}>
-                              {item.senderType} • {new Date(item.createdAt).toLocaleString()}
-                            </Typography>
-                            <Typography variant="body2" sx={{ color: "#f8fafc", whiteSpace: "pre-wrap" }}>
-                              {item.body}
-                            </Typography>
-                          </Box>
-                        ))}
-                      </Stack>
-                    ) : (
-                      <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.66)" }}>
-                        No chat messages yet.
-                      </Typography>
-                    )}
-                  </Box>
+                    Contact Admin
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="info"
+                    fullWidth
+                    startIcon={<TelegramIcon />}
+                    component="a"
+                    href={telegramUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Telegram
+                  </Button>
                 </Stack>
-              </CardContent>
-            </Card>
-          </Stack>
+              </Stack>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
-    </Box>
-  );
-}
 
-function FeaturePill({ label }: { label: string }) {
-  return (
-    <Chip
-      label={label}
-      sx={{
-        bgcolor: "rgba(255,255,255,0.08)",
-        color: "common.white",
-        borderRadius: 999,
-        fontWeight: 700,
-      }}
-    />
+      <Dialog open={chatOpen} onClose={() => setChatOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 900 }}>Contact Admin Chat</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.6}>
+            <Typography variant="body2" color="text.secondary">
+              Share your issue and our admin team will respond on this complaint thread.
+            </Typography>
+
+            {contactErr ? <Alert severity="error">{contactErr}</Alert> : null}
+            {contactToken ? <Alert severity="success">Complaint Token: {contactToken}</Alert> : null}
+
+            <TextField
+              label="Email"
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              fullWidth
+              required
+            />
+            <TextField
+              label="Name (optional)"
+              value={contactName}
+              onChange={(e) => setContactName(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Phone (optional)"
+              value={contactPhone}
+              onChange={(e) => setContactPhone(e.target.value)}
+              fullWidth
+            />
+
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              {QUICK_TEMPLATES.map((template) => (
+                <Button
+                  key={template}
+                  variant="text"
+                  size="small"
+                  onClick={() => setContactMessage(template)}
+                >
+                  {template}
+                </Button>
+              ))}
+            </Stack>
+
+            <TextField
+              label="Message"
+              value={contactMessage}
+              onChange={(e) => setContactMessage(e.target.value)}
+              multiline
+              minRows={3}
+              fullWidth
+            />
+
+            <Box
+              sx={{
+                maxHeight: 220,
+                overflowY: "auto",
+                borderRadius: 2,
+                border: "1px solid rgba(15,23,42,0.15)",
+                px: 1.2,
+                py: 1,
+                backgroundColor: "rgba(2, 6, 23, 0.03)",
+              }}
+            >
+              {contactThread.length ? (
+                <Stack spacing={1}>
+                  {contactThread.map((item) => (
+                    <Box
+                      key={item.id}
+                      sx={{
+                        p: 1,
+                        borderRadius: 1.5,
+                        backgroundColor: item.senderType === "ADMIN" ? "rgba(20,184,166,0.12)" : "rgba(37,99,235,0.1)",
+                      }}
+                    >
+                      <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                        {item.senderType} • {new Date(item.createdAt).toLocaleString()}
+                      </Typography>
+                      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                        {item.body}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                  No messages yet.
+                </Typography>
+              )}
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 2, py: 1.4 }}>
+          <Button onClick={() => setChatOpen(false)} color="inherit">
+            Close
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<SendRoundedIcon />}
+            onClick={sendSupportMessage}
+            disabled={contactBusy}
+          >
+            {contactBusy ? "Sending..." : contactToken ? "Send Reply" : "Start Chat"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 }
