@@ -1,87 +1,415 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
+import DeleteRoundedIcon from "@mui/icons-material/DeleteRounded";
+import EditRoundedIcon from "@mui/icons-material/EditRounded";
+import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
+import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
+import SwapHorizRoundedIcon from "@mui/icons-material/SwapHorizRounded";
 import {
-  Badge,
+  Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Checkbox,
-  Drawer,
-  DrawerBody,
-  DrawerCloseButton,
-  DrawerContent,
-  DrawerHeader,
-  DrawerOverlay,
-  Flex,
-  Heading,
-  HStack,
-  Input,
-  SimpleGrid,
-  Spinner,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControlLabel,
+  Grid,
+  MenuItem,
+  Stack,
   Table,
-  Tbody,
-  Td,
-  Text,
-  Th,
-  Thead,
-  Tr,
-  useDisclosure,
-  useToast,
-  VStack,
-} from "@chakra-ui/react";
-import { Layout } from "../../components/Layout";
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+  useTheme,
+} from "@mui/material";
+import { useEffect, useMemo, useState } from "react";
+import * as yup from "yup";
 import { api } from "../../app/api";
+import { getDashboardUi } from "../../dashboard/uiTokens";
 
+type ApiAuthType = "NONE" | "API_KEY_HEADER" | "BEARER_TOKEN" | "BASIC_AUTH" | "SESSION_LOGIN" | "OAUTH2";
+type ApiAuthConfig = { key?: string; value?: string; token?: string; username?: string; password?: string };
+type ApiMethodConfig = { queryParam: string };
+type ApiSessionConfig = {
+  loginUrl?: string;
+  usernameField?: string;
+  passwordField?: string;
+  captchaEnabled?: boolean;
+  sessionPolicy?: string;
+};
+type ApiRateLimitConfig = {
+  maxPerMinute?: number | null;
+  maxPerDay?: number | null;
+  cooldownSeconds?: number | null;
+};
+type ApiServiceLink = {
+  serviceId: string;
+  enabled: boolean;
+  priority: number;
+  service?: {
+    id: string;
+    name: string;
+    status: boolean;
+    type?: string;
+  };
+};
 type ApiItem = {
   id: string;
   name: string;
   baseUrl: string;
   endpoint: string;
-  method: string;
+  method: "GET" | "POST" | string;
   authType: string;
-  status?: boolean;
-  isActive?: boolean;
+  status: boolean;
   creditsPerSearch: number;
+  queryParam?: string;
+  sampleQuery?: string | null;
+  auth_config?: ApiAuthConfig;
+  method_config?: ApiMethodConfig;
+  apiKeyHeader?: string | null;
+  apiKeyValue?: string | null;
+  bearerToken?: string | null;
+  basicUser?: string | null;
+  basicPass?: string | null;
+  supportsCnic?: boolean;
+  supportsPhone?: boolean;
+  supportsEngine?: boolean;
+  supportsChassis?: boolean;
+  supportsReg?: boolean;
+  supportsLicense?: boolean;
+  customRegex?: string | null;
+  allowUser?: boolean;
+  allowReseller?: boolean;
+  allowAdmin?: boolean;
+  description?: string | null;
+  loginUrl?: string | null;
+  usernameField?: string | null;
+  passwordField?: string | null;
+  captchaEnabled?: boolean | null;
+  sessionPolicy?: string | null;
+  maxPerMinute?: number | null;
+  maxPerDay?: number | null;
+  cooldownSeconds?: number | null;
+  session_config?: ApiSessionConfig;
+  rate_limit_config?: ApiRateLimitConfig;
+  serviceApis?: ApiServiceLink[];
 };
-
-type ServiceApiLink = { apiId: string; enabled: boolean; priority: number };
+type ServiceApiLink = {
+  apiId: string;
+  enabled: boolean;
+  priority: number;
+  api?: {
+    id: string;
+    name: string;
+    status: boolean;
+    creditsPerSearch: number;
+  };
+};
 type ServiceItem = {
   id: string;
   name: string;
-  status: boolean;
+  description?: string | null;
+  icon?: string | null;
   type?: string;
+  status: boolean;
+  defaultCost: number;
   serviceApis: ServiceApiLink[];
+  metrics?: {
+    totalSearches: number;
+    successSearches: number;
+    errorSearches: number;
+    blockedSearches: number;
+    totalRevenueCredits: number;
+    lastSearchAt?: string | null;
+    successRate: number;
+    mappedApis: number;
+    activeMappedApis: number;
+    runtimeCost: number;
+  };
+};
+type ApiHealthItem = {
+  id: string;
+  name: string;
+  status: string;
+  apiEnabled: boolean;
+  endpoint: string;
+  method: string;
+  sampleQuery?: string | null;
+  rollingLatencyMs?: number | null;
+  timeoutCount?: number;
+  serviceMappings: Array<{
+    serviceId: string;
+    serviceName: string;
+    mappingEnabled: boolean;
+    priority: number;
+  }>;
+};
+type ApiFormState = {
+  name: string;
+  method: "GET" | "POST";
+  baseUrl: string;
+  endpoint: string;
+  description: string;
+  authType: ApiAuthType;
+  auth_config: ApiAuthConfig;
+  session_config: ApiSessionConfig;
+  method_config: ApiMethodConfig;
+  rate_limit_config: ApiRateLimitConfig;
+  creditsPerSearch: number;
+  status: boolean;
+  sampleQuery: string;
+  supportsCnic: boolean;
+  supportsPhone: boolean;
+  supportsEngine: boolean;
+  supportsChassis: boolean;
+  supportsReg: boolean;
+  supportsLicense: boolean;
+  customRegex: string;
+  allowUser: boolean;
+  allowReseller: boolean;
+  allowAdmin: boolean;
+  serviceLinks: Array<{
+    serviceId: string;
+    enabled: boolean;
+    priority: number;
+  }>;
 };
 
-function isApiActive(x: ApiItem) {
-  if (typeof x.status === "boolean") return x.status;
-  if (typeof x.isActive === "boolean") return x.isActive;
-  return true;
+type ServiceLinkFormItem = {
+  apiId: string;
+  enabled: boolean;
+  priority: number;
+};
+
+function boolChip(value: boolean) {
+  return <Chip size="small" label={value ? "Active" : "Inactive"} color={value ? "success" : "default"} variant="outlined" />;
 }
 
-export default function AdminApis({ onLogout }: { onLogout: () => void }) {
-  const toast = useToast();
+function getDefaultAuthConfig(authType: ApiAuthType): ApiAuthConfig {
+  if (authType === "API_KEY_HEADER") return { key: "", value: "" };
+  if (authType === "BEARER_TOKEN") return { token: "" };
+  if (authType === "BASIC_AUTH") return { username: "", password: "" };
+  return {};
+}
+
+function createEmptyApiForm(): ApiFormState {
+  return {
+    name: "",
+    method: "GET",
+    baseUrl: "",
+    endpoint: "",
+    description: "",
+    authType: "NONE",
+    auth_config: {},
+    session_config: { loginUrl: "", usernameField: "", passwordField: "", captchaEnabled: false, sessionPolicy: "AUTO_REFRESH" },
+    method_config: { queryParam: "query" },
+    rate_limit_config: { maxPerMinute: null, maxPerDay: null, cooldownSeconds: null },
+    creditsPerSearch: 1,
+    status: true,
+    sampleQuery: "",
+    supportsCnic: false,
+    supportsPhone: false,
+    supportsEngine: false,
+    supportsChassis: false,
+    supportsReg: false,
+    supportsLicense: false,
+    customRegex: "",
+    allowUser: true,
+    allowReseller: true,
+    allowAdmin: true,
+    serviceLinks: [],
+  };
+}
+
+function getApiFormFromItem(item: ApiItem, services: ServiceItem[]): ApiFormState {
+  const authType = (item.authType || "NONE") as ApiAuthType;
+  const byServiceId = new Map((item.serviceApis ?? []).map((link) => [link.serviceId, link]));
+  return {
+    name: item.name ?? "",
+    method: (item.method || "GET") as "GET" | "POST",
+    baseUrl: item.baseUrl ?? "",
+    endpoint: item.endpoint ?? "",
+    description: item.description ?? "",
+    authType,
+    auth_config:
+      item.auth_config ??
+      (authType === "API_KEY_HEADER"
+        ? { key: item.apiKeyHeader ?? "", value: item.apiKeyValue ?? "" }
+        : authType === "BEARER_TOKEN"
+          ? { token: item.bearerToken ?? "" }
+          : authType === "BASIC_AUTH"
+            ? { username: item.basicUser ?? "", password: item.basicPass ?? "" }
+          : {}),
+    session_config:
+      item.session_config ?? {
+        loginUrl: item.loginUrl ?? "",
+        usernameField: item.usernameField ?? "",
+        passwordField: item.passwordField ?? "",
+        captchaEnabled: item.captchaEnabled ?? false,
+        sessionPolicy: item.sessionPolicy ?? "AUTO_REFRESH",
+      },
+    method_config: item.method_config ?? { queryParam: item.queryParam ?? "query" },
+    rate_limit_config:
+      item.rate_limit_config ?? {
+        maxPerMinute: item.maxPerMinute ?? null,
+        maxPerDay: item.maxPerDay ?? null,
+        cooldownSeconds: item.cooldownSeconds ?? null,
+      },
+    creditsPerSearch: item.creditsPerSearch ?? 1,
+    status: item.status ?? true,
+    sampleQuery: item.sampleQuery ?? "",
+    supportsCnic: item.supportsCnic ?? false,
+    supportsPhone: item.supportsPhone ?? false,
+    supportsEngine: item.supportsEngine ?? false,
+    supportsChassis: item.supportsChassis ?? false,
+    supportsReg: item.supportsReg ?? false,
+    supportsLicense: item.supportsLicense ?? false,
+    customRegex: item.customRegex ?? "",
+    allowUser: item.allowUser ?? true,
+    allowReseller: item.allowReseller ?? true,
+    allowAdmin: item.allowAdmin ?? true,
+    serviceLinks: services.map((service, index) => {
+      const existing = byServiceId.get(service.id);
+      return {
+        serviceId: service.id,
+        enabled: existing?.enabled ?? false,
+        priority: existing?.priority ?? index + 1,
+      };
+    }),
+  };
+}
+
+function toApiPayload(form: ApiFormState) {
+  const queryParam = form.method_config.queryParam.trim();
+  const authConfig = form.auth_config ?? {};
+  return {
+    name: form.name.trim(),
+    method: form.method,
+    baseUrl: form.baseUrl.trim(),
+    endpoint: form.endpoint.trim(),
+    description: form.description.trim() || undefined,
+    authType: form.authType,
+    auth_config: authConfig,
+    session_config: {
+      loginUrl: form.session_config.loginUrl?.trim() || undefined,
+      usernameField: form.session_config.usernameField?.trim() || undefined,
+      passwordField: form.session_config.passwordField?.trim() || undefined,
+      captchaEnabled: Boolean(form.session_config.captchaEnabled),
+      sessionPolicy: form.session_config.sessionPolicy?.trim() || undefined,
+    },
+    method_config: { queryParam },
+    queryParam,
+    apiKeyHeader: form.authType === "API_KEY_HEADER" ? authConfig.key?.trim() || undefined : undefined,
+    apiKeyValue: form.authType === "API_KEY_HEADER" ? authConfig.value?.trim() || undefined : undefined,
+    bearerToken: form.authType === "BEARER_TOKEN" ? authConfig.token?.trim() || undefined : undefined,
+    basicUser: form.authType === "BASIC_AUTH" ? authConfig.username?.trim() || undefined : undefined,
+    basicPass: form.authType === "BASIC_AUTH" ? authConfig.password?.trim() || undefined : undefined,
+    loginUrl: form.authType === "SESSION_LOGIN" ? form.session_config.loginUrl?.trim() || undefined : undefined,
+    usernameField: form.authType === "SESSION_LOGIN" ? form.session_config.usernameField?.trim() || undefined : undefined,
+    passwordField: form.authType === "SESSION_LOGIN" ? form.session_config.passwordField?.trim() || undefined : undefined,
+    captchaEnabled: form.authType === "SESSION_LOGIN" ? Boolean(form.session_config.captchaEnabled) : undefined,
+    sessionPolicy: form.authType === "SESSION_LOGIN" ? form.session_config.sessionPolicy?.trim() || undefined : undefined,
+    rate_limit_config: {
+      maxPerMinute: form.rate_limit_config.maxPerMinute ?? null,
+      maxPerDay: form.rate_limit_config.maxPerDay ?? null,
+      cooldownSeconds: form.rate_limit_config.cooldownSeconds ?? null,
+    },
+    maxPerMinute: form.rate_limit_config.maxPerMinute ?? null,
+    maxPerDay: form.rate_limit_config.maxPerDay ?? null,
+    cooldownSeconds: form.rate_limit_config.cooldownSeconds ?? null,
+    creditsPerSearch: Number(form.creditsPerSearch),
+    status: form.status,
+    sampleQuery: form.sampleQuery.trim() || undefined,
+    supportsCnic: form.supportsCnic,
+    supportsPhone: form.supportsPhone,
+    supportsEngine: form.supportsEngine,
+    supportsChassis: form.supportsChassis,
+    supportsReg: form.supportsReg,
+    supportsLicense: form.supportsLicense,
+    customRegex: form.customRegex.trim() || undefined,
+    allowUser: form.allowUser,
+    allowReseller: form.allowReseller,
+    allowAdmin: form.allowAdmin,
+    serviceLinks: form.serviceLinks
+      .filter((item) => item.enabled)
+      .sort((a, b) => a.priority - b.priority)
+      .map((item, index) => ({
+        serviceId: item.serviceId,
+        enabled: true,
+        priority: index + 1,
+      })),
+  };
+}
+
+function normalizeServiceLinks(service: ServiceItem | null, apis: ApiItem[]): ServiceLinkFormItem[] {
+  if (!service) return apis.map((item, index) => ({ apiId: item.id, enabled: false, priority: index + 1 }));
+  const byApiId = new Map(service.serviceApis.map((item) => [item.apiId, item]));
+  return apis.map((item, index) => {
+    const existing = byApiId.get(item.id);
+    return {
+      apiId: item.id,
+      enabled: existing?.enabled ?? false,
+      priority: existing?.priority ?? index + 1,
+    };
+  });
+}
+
+function blurActiveElement() {
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLElement) activeElement.blur();
+}
+
+export default function AdminApis() {
+  const theme = useTheme();
+  const ui = getDashboardUi(theme.palette.mode);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [apis, setApis] = useState<ApiItem[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
-  const [q, setQ] = useState("");
-
-  const { isOpen, onOpen, onClose } = useDisclosure();
-  const [activeApi, setActiveApi] = useState<ApiItem | null>(null);
+  const [healthItems, setHealthItems] = useState<ApiHealthItem[]>([]);
+  const [query, setQuery] = useState("");
+  const [editingApi, setEditingApi] = useState<ApiItem | null>(null);
+  const [editingSvc, setEditingSvc] = useState<ServiceItem | null>(null);
+  const [apiOpen, setApiOpen] = useState(false);
+  const [serviceOpen, setServiceOpen] = useState(false);
+  const [testQuery, setTestQuery] = useState("");
+  const [testResponse, setTestResponse] = useState("");
+  const [testingApi, setTestingApi] = useState(false);
+  const [apiErrors, setApiErrors] = useState<Record<string, string>>({});
+  const [apiForm, setApiForm] = useState<ApiFormState>(createEmptyApiForm);
+  const [svcForm, setSvcForm] = useState({
+    name: "",
+    description: "",
+    icon: "",
+    type: "Search",
+    defaultCost: 1,
+    status: true,
+    links: [] as ServiceLinkFormItem[],
+  });
 
   async function load() {
+    setLoading(true);
+    setError("");
     try {
-      setLoading(true);
-      const [a, s] = await Promise.all([api.get("/admin/apis"), api.get("/admin/services")]);
-      const apiItems = a.data?.apis ?? a.data?.items ?? a.data ?? [];
-      const svcItems = s.data?.services ?? s.data?.items ?? s.data ?? [];
+      const [apisRes, servicesRes, healthRes] = await Promise.all([api.get("/admin/apis"), api.get("/admin/services"), api.get("/admin/api-health")]);
+      const apiItems = apisRes.data?.items ?? apisRes.data?.apis ?? apisRes.data ?? [];
+      const serviceItems = servicesRes.data?.items ?? servicesRes.data?.services ?? servicesRes.data ?? [];
+      const apiHealthItems = healthRes.data?.items ?? [];
       setApis(Array.isArray(apiItems) ? apiItems : []);
-      setServices(Array.isArray(svcItems) ? svcItems : []);
+      setServices(Array.isArray(serviceItems) ? serviceItems : []);
+      setHealthItems(Array.isArray(apiHealthItems) ? apiHealthItems : []);
     } catch (e: any) {
-      toast({
-        title: "Failed to load API/Services",
-        description: e?.response?.data?.message || e?.message || "Unknown error",
-        status: "error",
-      });
+      setError(e?.response?.data?.message || e?.message || "Failed to load APIs and services.");
     } finally {
       setLoading(false);
     }
@@ -89,514 +417,1271 @@ export default function AdminApis({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredApis = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return apis;
-    return apis.filter((x) =>
-      [x.name, x.baseUrl, x.endpoint, x.method, x.authType]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(s)
+    const needle = query.trim().toLowerCase();
+    if (!needle) return apis;
+    return apis.filter((item) =>
+      [item.name, item.baseUrl, item.endpoint, item.method, item.authType].filter(Boolean).join(" ").toLowerCase().includes(needle)
     );
-  }, [apis, q]);
+  }, [apis, query]);
 
-  const serviceIdsByApi = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const svc of services) {
-      for (const link of svc.serviceApis || []) {
-        if (!map.has(link.apiId)) map.set(link.apiId, new Set());
-        map.get(link.apiId)!.add(svc.id);
-      }
-    }
-    return map;
-  }, [services]);
+  const filteredServices = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return services;
+    return services.filter((item) =>
+      [item.name, item.type, item.icon, item.description].filter(Boolean).join(" ").toLowerCase().includes(needle)
+    );
+  }, [services, query]);
 
-  async function updateServiceApis(serviceId: string, apiIds: string[]) {
-    setSaving(true);
+  function openCreateApi() {
+    blurActiveElement();
+    setEditingApi(null);
+    setApiForm({
+      ...createEmptyApiForm(),
+      serviceLinks: services.map((service, index) => ({
+        serviceId: service.id,
+        enabled: false,
+        priority: index + 1,
+      })),
+    });
+    setApiErrors({});
+    setTestQuery("");
+    setTestResponse("");
+    setApiOpen(true);
+  }
+
+  function openEditApi(item: ApiItem) {
+    blurActiveElement();
+    const nextForm = getApiFormFromItem(item, services);
+    setEditingApi(item);
+    setApiForm(nextForm);
+    setApiErrors({});
+    setTestQuery(nextForm.sampleQuery || "");
+    setTestResponse("");
+    setApiOpen(true);
+  }
+
+  function setApiServiceLinkEnabled(serviceId: string, enabled: boolean) {
+    setApiForm((prev) => ({
+      ...prev,
+      serviceLinks: prev.serviceLinks.map((item) => (item.serviceId === serviceId ? { ...item, enabled } : item)),
+    }));
+  }
+
+  function setApiServiceLinkPriority(serviceId: string, priority: number) {
+    setApiForm((prev) => ({
+      ...prev,
+      serviceLinks: prev.serviceLinks.map((item) =>
+        item.serviceId === serviceId ? { ...item, priority: Number.isFinite(priority) && priority > 0 ? priority : 1 } : item
+      ),
+    }));
+  }
+
+  function openCreateService() {
+    blurActiveElement();
+    setEditingSvc(null);
+    setSvcForm({
+      name: "",
+      description: "",
+      icon: "",
+      type: "Search",
+      defaultCost: 1,
+      status: true,
+      links: normalizeServiceLinks(null, apis),
+    });
+    setServiceOpen(true);
+  }
+
+  function openEditService(item: ServiceItem) {
+    blurActiveElement();
+    setEditingSvc(item);
+    setSvcForm({
+      name: item.name,
+      description: item.description ?? "",
+      icon: item.icon ?? "",
+      type: item.type ?? "Search",
+      defaultCost: item.defaultCost ?? 1,
+      status: item.status ?? true,
+      links: normalizeServiceLinks(item, apis),
+    });
+    setServiceOpen(true);
+  }
+
+  function setAuthType(nextType: ApiAuthType) {
+    setApiForm((prev) => ({ ...prev, authType: nextType, auth_config: getDefaultAuthConfig(nextType) }));
+    setApiErrors({});
+  }
+
+  function setServiceLinkEnabled(apiId: string, enabled: boolean) {
+    setSvcForm((prev) => ({
+      ...prev,
+      links: prev.links.map((item) => (item.apiId === apiId ? { ...item, enabled } : item)),
+    }));
+  }
+
+  function setServiceLinkPriority(apiId: string, priority: number) {
+    setSvcForm((prev) => ({
+      ...prev,
+      links: prev.links.map((item) =>
+        item.apiId === apiId ? { ...item, priority: Number.isFinite(priority) && priority > 0 ? priority : 1 } : item
+      ),
+    }));
+  }
+
+  async function validateApiForm() {
+    const schema = yup.object({
+      name: yup.string().trim().min(2, "Name must be at least 2 characters").required("Name is required"),
+      method: yup.string().oneOf(["GET", "POST"]).required("Method is required"),
+      baseUrl: yup.string().trim().url("Base URL must be valid").required("Base URL is required"),
+      endpoint: yup.string().default(""),
+      description: yup.string().default(""),
+      authType: yup.string().oneOf(["NONE", "API_KEY_HEADER", "BEARER_TOKEN", "BASIC_AUTH", "SESSION_LOGIN", "OAUTH2"]).required(),
+      method_config: yup.object({
+        queryParam: yup.string().trim().required("Query param is required"),
+      }),
+      auth_config: yup
+        .object()
+        .when("authType", {
+          is: "API_KEY_HEADER",
+          then: () => yup.object({ key: yup.string().trim().required("Header key is required"), value: yup.string().trim().required("Header value is required") }),
+        })
+        .when("authType", {
+          is: "BEARER_TOKEN",
+          then: () => yup.object({ token: yup.string().trim().required("Token is required") }),
+        })
+        .when("authType", {
+          is: "BASIC_AUTH",
+          then: () =>
+            yup.object({
+              username: yup.string().trim().required("Username is required"),
+              password: yup.string().trim().required("Password is required"),
+            }),
+        }),
+      session_config: yup.object().when("authType", {
+        is: "SESSION_LOGIN",
+        then: () =>
+          yup.object({
+            loginUrl: yup.string().trim().url("Login URL must be valid").required("Login URL is required"),
+            usernameField: yup.string().trim().required("Username field is required"),
+            passwordField: yup.string().trim().required("Password field is required"),
+            captchaEnabled: yup.boolean().default(false),
+            sessionPolicy: yup.string().trim().required("Session policy is required"),
+          }),
+      }),
+      rate_limit_config: yup.object({
+        maxPerMinute: yup.number().nullable().transform((value, originalValue) => (originalValue === "" || originalValue == null ? null : value)).integer().min(1).nullable(),
+        maxPerDay: yup.number().nullable().transform((value, originalValue) => (originalValue === "" || originalValue == null ? null : value)).integer().min(1).nullable(),
+        cooldownSeconds: yup.number().nullable().transform((value, originalValue) => (originalValue === "" || originalValue == null ? null : value)).integer().min(0).nullable(),
+      }),
+      creditsPerSearch: yup.number().typeError("Credits must be a number").integer().min(0).required(),
+      status: yup.boolean().required(),
+    });
+
     try {
-      await api.put(`/admin/services/${serviceId}`, { apiIds });
+      await schema.validate(apiForm, { abortEarly: false });
+      setApiErrors({});
+      return true;
+    } catch (validationError) {
+      if (validationError instanceof yup.ValidationError) {
+        const nextErrors: Record<string, string> = {};
+        for (const item of validationError.inner) {
+          if (item.path && !nextErrors[item.path]) nextErrors[item.path] = item.message;
+        }
+        setApiErrors(nextErrors);
+      }
+      return false;
+    }
+  }
+
+  async function saveApi() {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const valid = await validateApiForm();
+      if (!valid) return;
+      const payload = toApiPayload(apiForm);
+      if (editingApi) await api.put(`/admin/apis/${editingApi.id}`, payload);
+      else await api.post("/admin/apis", payload);
+      setApiOpen(false);
+      setSuccess("API saved.");
       await load();
-      toast({ title: "Updated", status: "success" });
     } catch (e: any) {
-      toast({
-        title: "Update failed",
-        description: e?.response?.data?.message || e?.message || "Unknown error",
-        status: "error",
-      });
+      const issues = Array.isArray(e?.response?.data?.issues) ? e.response.data.issues : [];
+      if (issues.length) {
+        const nextErrors: Record<string, string> = {};
+        for (const issue of issues) {
+          const path = Array.isArray(issue?.path) ? issue.path.join(".") : "";
+          if (path && !nextErrors[path]) nextErrors[path] = issue?.message || "Invalid value";
+        }
+        if (Object.keys(nextErrors).length) setApiErrors(nextErrors);
+      }
+      setError(
+        issues[0]?.message ||
+          e?.response?.data?.message ||
+          e?.message ||
+          "Failed to save API."
+      );
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleMatrix(service: ServiceItem, apiId: string) {
-    const current = new Set((service.serviceApis || []).map((x) => x.apiId));
-    if (current.has(apiId)) current.delete(apiId);
-    else current.add(apiId);
-    await updateServiceApis(service.id, Array.from(current));
-  }
-
-  function openApiDrawer(item: ApiItem) {
-    setActiveApi(item);
-    onOpen();
-  }
-
-  async function saveApiAssignments(apiId: string, selectedServiceIds: string[]) {
-    // Update each service assignment. Small N, safe.
+  async function saveService() {
     setSaving(true);
+    setError("");
+    setSuccess("");
     try {
-      const svcWithApi = services.filter((s) => (s.serviceApis || []).some((l) => l.apiId === apiId)).map((s) => s.id);
-      const toAdd = selectedServiceIds.filter((id) => !svcWithApi.includes(id));
-      const toRemove = svcWithApi.filter((id) => !selectedServiceIds.includes(id));
-
-      for (const id of toAdd) {
-        const svc = services.find((x) => x.id === id);
-        const next = new Set((svc?.serviceApis || []).map((x) => x.apiId));
-        next.add(apiId);
-        await api.put(`/admin/services/${id}`, { apiIds: Array.from(next) });
-      }
-      for (const id of toRemove) {
-        const svc = services.find((x) => x.id === id);
-        const next = new Set((svc?.serviceApis || []).map((x) => x.apiId));
-        next.delete(apiId);
-        await api.put(`/admin/services/${id}`, { apiIds: Array.from(next) });
-      }
-
-      toast({ title: "Assignments saved", status: "success" });
+      const payload = {
+        ...svcForm,
+        links: svcForm.links
+          .filter((item) => item.enabled)
+          .sort((a, b) => a.priority - b.priority)
+          .map((item, index) => ({
+            apiId: item.apiId,
+            enabled: true,
+            priority: index + 1,
+          })),
+      };
+      if (editingSvc) await api.put(`/admin/services/${editingSvc.id}`, payload);
+      else await api.post("/admin/services", payload);
+      setServiceOpen(false);
       await load();
     } catch (e: any) {
-      toast({
-        title: "Save failed",
-        description: e?.response?.data?.message || e?.message || "Unknown error",
-        status: "error",
-      });
+      setError(e?.response?.data?.message || e?.message || "Failed to save service.");
     } finally {
       setSaving(false);
-      onClose();
+    }
+  }
+
+  async function toggleApi(id: string) {
+    setSaving(true);
+    setSuccess("");
+    try {
+      await api.post(`/admin/apis/${id}/toggle`, {});
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to toggle API.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteApi(id: string) {
+    if (!window.confirm("Delete this API?")) return;
+    setSaving(true);
+    setSuccess("");
+    try {
+      await api.delete(`/admin/apis/${id}`);
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to delete API.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleService(id: string) {
+    setSaving(true);
+    setSuccess("");
+    try {
+      await api.post(`/admin/services/${id}/toggle`, {});
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to toggle service.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteService(id: string) {
+    if (!window.confirm("Delete this service?")) return;
+    setSaving(true);
+    setSuccess("");
+    try {
+      await api.delete(`/admin/services/${id}`);
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to delete service.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runLiveTest() {
+    if (!editingApi) {
+      setError("Save API first to use live testing.");
+      return;
+    }
+    setTestingApi(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.post(`/admin/apis/${editingApi.id}/test`, {
+        query: testQuery.trim() || apiForm.sampleQuery.trim(),
+      });
+      setTestResponse(JSON.stringify(response.data?.result ?? response.data, null, 2));
+    } catch (e: any) {
+      setTestResponse(
+        JSON.stringify(
+          {
+            status: e?.response?.status,
+            data: e?.response?.data ?? null,
+            message: e?.message ?? "Live test failed",
+          },
+          null,
+          2
+        )
+      );
+    } finally {
+      setTestingApi(false);
+    }
+  }
+
+  async function probeApiHealthItem(item: ApiHealthItem) {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      await api.post(`/admin/api-health/${item.id}/probe`, { query: item.sampleQuery || undefined });
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to probe API health.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleApiHealthItem(item: ApiHealthItem) {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      await api.post(`/admin/api-health/${item.id}/toggle`, {});
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to toggle API health.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function syncMappings() {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const res = await api.post("/admin/apis/sync-mappings", {});
+      const summary = res.data?.summary;
+      const totalApis = Number(summary?.totalApis ?? 0);
+      const totalCreated = Number(summary?.totalCreatedLinks ?? 0);
+      const totalUpdated = Number(summary?.totalUpdatedLinks ?? 0);
+      const totalRemoved = Number(summary?.totalRemovedLinks ?? 0);
+      setSuccess(`Mappings synced for ${totalApis} APIs. Created ${totalCreated}, updated ${totalUpdated}, removed ${totalRemoved}.`);
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to sync API mappings.");
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <Layout role="ADMIN" onLogout={onLogout}>
-      <Box px={{ base: 4, md: 8 }} py={{ base: 6, md: 8 }}>
-        <Flex direction={{ base: "column", md: "row" }} justify="space-between" align={{ base: "stretch", md: "center" }} gap={4} mb={6}>
-          <Box>
-            <Heading size="lg">API Management</Heading>
-            <Text color="whiteAlpha.700" mt={1}>
-              Assign APIs to services visually (matrix) and manage per-service routing.
-            </Text>
-          </Box>
+    <Stack spacing={3}>
+      <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" spacing={2}>
+        <Box>
+          <Typography variant="h4" mb={0.5} sx={{ color: ui.text.primary }}>
+            API Management
+          </Typography>
+          <Typography variant="body2" sx={{ color: ui.text.secondary }}>
+            Configure APIs, service mapping, and live connectivity.
+          </Typography>
+        </Box>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+          <TextField
+            size="small"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search APIs or services"
+          />
+          <Button startIcon={<RefreshRoundedIcon />} variant="outlined" onClick={load} disabled={loading}>
+            Refresh
+          </Button>
+        </Stack>
+      </Stack>
 
-          <HStack gap={3} align="center">
-            <Input
-              placeholder="Search APIs..."
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              maxW={{ base: "100%", md: "280px" }}
-              bg="whiteAlpha.50"
-              borderColor="whiteAlpha.200"
-            />
-            <Button onClick={load} colorScheme="blue" isLoading={loading}>
-              Refresh
-            </Button>
-          </HStack>
-        </Flex>
+      {success ? <Alert severity="success" onClose={() => setSuccess("")}>{success}</Alert> : null}
+      {error ? <Alert severity="warning" onClose={() => setError("")}>{error}</Alert> : null}
 
-        <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={6} alignItems="start">
-          {/* Left: APIs */}
-          <Box
-            borderRadius="2xl"
-            borderWidth="1px"
-            borderColor="whiteAlpha.200"
-            bg="whiteAlpha.50"
-            overflow="hidden"
-          >
-            <Box px={5} py={4} borderBottom="1px solid rgba(255,255,255,0.08)">
-              <Heading size="sm">Configured APIs</Heading>
-              <Text fontSize="sm" opacity={0.75} mt={1}>
-                Click an API to multi-assign services.
-              </Text>
-            </Box>
-
-            {loading ? (
-              <Flex p={10} justify="center">
-                <Spinner size="lg" />
-              </Flex>
-            ) : filteredApis.length === 0 ? (
-              <Box p={10} textAlign="center">
-                <Text color="whiteAlpha.700">No APIs found.</Text>
+      <Grid container spacing={3} sx={{ width: "100%", m: 0 }}>
+        <Grid item xs={12} xl={6}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1.25} mb={2}>
+                <Typography variant="h6">Configured APIs</Typography>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  <Button startIcon={<RefreshRoundedIcon />} variant="outlined" onClick={syncMappings} disabled={saving}>
+                    Auto Sync Legacy
+                  </Button>
+                  <Button startIcon={<AddRoundedIcon />} variant="contained" onClick={openCreateApi}>
+                    Add API
+                  </Button>
+                </Stack>
+              </Stack>
+              <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: 520, minHeight: 520, pr: 1 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Name</TableCell>
+                      <TableCell>Method</TableCell>
+                      <TableCell align="right">Credits</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell align="right">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {filteredApis.map((item) => (
+                      <TableRow key={item.id} hover>
+                        <TableCell>
+                          <Typography fontWeight={800}>{item.name}</Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+                            {item.baseUrl}
+                            {item.endpoint}
+                          </Typography>
+                          <Stack direction="row" flexWrap="wrap" gap={0.75} mt={1}>
+                            {[item.supportsCnic && "CNIC", item.supportsPhone && "Mobile", item.supportsEngine && "Engine", item.supportsChassis && "Chassis", item.supportsReg && "Reg", item.supportsLicense && "License"]
+                              .filter(Boolean)
+                              .map((label) => (
+                                <Chip key={`${item.id}-${label}`} size="small" variant="outlined" label={label} />
+                              ))}
+                            {!([item.supportsCnic, item.supportsPhone, item.supportsEngine, item.supportsChassis, item.supportsReg, item.supportsLicense].some(Boolean)) ? (
+                              <Typography variant="caption" color="text.secondary">
+                                No query types configured
+                              </Typography>
+                            ) : null}
+                          </Stack>
+                          <Stack direction="row" flexWrap="wrap" gap={0.75} mt={1}>
+                            {(item.serviceApis ?? []).length
+                              ? (item.serviceApis ?? []).map((link) => (
+                                  <Chip
+                                    key={`${item.id}-${link.serviceId}`}
+                                    size="small"
+                                    color={link.enabled ? "primary" : "default"}
+                                    variant={link.enabled ? "filled" : "outlined"}
+                                    label={`${link.priority}. ${link.service?.name ?? link.serviceId}`}
+                                  />
+                                ))
+                              : (
+                                <Typography variant="caption" color="text.secondary">
+                                  No services mapped
+                                </Typography>
+                              )}
+                          </Stack>
+                        </TableCell>
+                        <TableCell>
+                          <Chip size="small" label={item.method} variant="outlined" />
+                        </TableCell>
+                        <TableCell align="right">{item.creditsPerSearch ?? 1}</TableCell>
+                        <TableCell>{boolChip(Boolean(item.status))}</TableCell>
+                        <TableCell align="right">
+                          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="flex-end" spacing={0.5} alignItems={{ xs: "stretch", sm: "center" }}>
+                            <Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEditApi(item)}>
+                              Edit
+                            </Button>
+                            <Button size="small" startIcon={<SwapHorizRoundedIcon />} onClick={() => toggleApi(item.id)}>
+                              Toggle
+                            </Button>
+                            <Button size="small" color="error" startIcon={<DeleteRoundedIcon />} onClick={() => deleteApi(item.id)}>
+                              Delete
+                            </Button>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </Box>
-            ) : (
-              <Table variant="simple" size="sm">
-                <Thead bg="whiteAlpha.100">
-                  <Tr>
-                    <Th>Name</Th>
-                    <Th>Method</Th>
-                    <Th isNumeric>Credits</Th>
-                    <Th>Assigned</Th>
-                    <Th>Status</Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {filteredApis.map((x) => {
-                    const assignedCount = serviceIdsByApi.get(x.id)?.size ?? 0;
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} xl={6}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1.25} mb={2}>
+                <Typography variant="h6">Configured Services</Typography>
+                <Button startIcon={<AddRoundedIcon />} variant="contained" onClick={openCreateService}>
+                  Add Service
+                </Button>
+              </Stack>
+              <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: 520, minHeight: 520, pr: 1 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Name</TableCell>
+                      <TableCell>Type</TableCell>
+                      <TableCell align="right">Runtime</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell align="right">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {filteredServices.map((item) => (
+                      <TableRow key={item.id} hover>
+                        <TableCell>
+                          <Typography fontWeight={800}>{item.name}</Typography>
+                          {item.description ? (
+                            <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>
+                              {item.description}
+                            </Typography>
+                          ) : null}
+                          <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: ui.text.secondary }}>
+                            Searches: {item.metrics?.totalSearches ?? 0} | Success: {item.metrics?.successRate ?? 0}% | APIs: {item.metrics?.activeMappedApis ?? 0}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip size="small" label={item.type ?? "Search"} variant="outlined" />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography fontWeight={700}>{item.metrics?.runtimeCost ?? 0} credits</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Stored default: {item.defaultCost ?? 1}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>{boolChip(Boolean(item.status))}</TableCell>
+                        <TableCell align="right">
+                          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="flex-end" spacing={0.5} alignItems={{ xs: "stretch", sm: "center" }}>
+                            <Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEditService(item)}>
+                              Edit
+                            </Button>
+                            <Button size="small" startIcon={<SwapHorizRoundedIcon />} onClick={() => toggleService(item.id)}>
+                              Toggle
+                            </Button>
+                            <Button size="small" color="error" startIcon={<DeleteRoundedIcon />} onClick={() => deleteService(item.id)}>
+                              Delete
+                            </Button>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" mb={0.5}>
+                Unified Search Mapping
+              </Typography>
+              <Typography variant="body2" color="text.secondary" mb={2}>
+                Services are your products. APIs are the backend sources used by unified search. Edit each service to control which APIs are active and in what priority order.
+              </Typography>
+              <Stack spacing={1.25}>
+                {services.map((service) => (
+                  <Box
+                    key={service.id}
+                    sx={{
+                      border: `1px solid ${ui.surface.border}`,
+                      borderRadius: 2,
+                      px: 2,
+                      py: 1.5,
+                    }}
+                  >
+                    <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }}>
+                      <Box>
+                        <Typography fontWeight={800}>{service.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Active APIs: {service.metrics?.activeMappedApis ?? 0} / {service.metrics?.mappedApis ?? 0} | Revenue credits: {service.metrics?.totalRevenueCredits ?? 0}
+                        </Typography>
+                      </Box>
+                      <Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEditService(service)}>
+                        Edit Mapping
+                      </Button>
+                    </Stack>
+                    <Stack direction="row" flexWrap="wrap" gap={1} mt={1.25}>
+                      {service.serviceApis.length ? (
+                        service.serviceApis.map((link) => (
+                          <Chip
+                            key={`${service.id}-${link.apiId}`}
+                            size="small"
+                            color={link.enabled ? "primary" : "default"}
+                            variant={link.enabled ? "filled" : "outlined"}
+                            label={`${link.priority}. ${link.api?.name ?? link.apiId}${link.enabled ? "" : " (off)"}`}
+                          />
+                        ))
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          No APIs mapped yet.
+                        </Typography>
+                      )}
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      <Card>
+        <CardContent>
+          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1.25} mb={2}>
+            <Box>
+              <Typography variant="h6">API Health</Typography>
+              <Typography variant="body2" color="text.secondary">Runtime health, probe latency, and service mappings.</Typography>
+            </Box>
+            <Button startIcon={<RefreshRoundedIcon />} variant="outlined" onClick={load} disabled={loading}>
+              Refresh Health
+            </Button>
+          </Stack>
+          <Box sx={{ overflowX: "auto" }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>API</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Latency</TableCell>
+                  <TableCell>Mappings</TableCell>
+                  <TableCell align="right">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {healthItems.map((item) => (
+                  <TableRow key={item.id} hover>
+                    <TableCell>
+                      <Typography fontWeight={800}>{item.name}</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+                        {item.method} {item.endpoint}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={item.status || "UNKNOWN"}
+                        color={item.status === "HEALTHY" ? "success" : item.status === "UNHEALTHY" ? "warning" : "default"}
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>{item.rollingLatencyMs ? `${item.rollingLatencyMs} ms` : "-"}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.serviceMappings.map((mapping) => `${mapping.serviceName} (#${mapping.priority})`).join(", ") || "No mappings"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="flex-end" spacing={0.5}>
+                        <Button size="small" variant="outlined" onClick={() => probeApiHealthItem(item)}>
+                          Probe
+                        </Button>
+                        <Button size="small" variant="outlined" onClick={() => toggleApiHealthItem(item)}>
+                          {item.apiEnabled ? "Disable" : "Enable"}
+                        </Button>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!healthItems.length ? (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Typography color="text.secondary">No API health records available.</Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </Box>
+        </CardContent>
+      </Card>
+
+      <Dialog open={apiOpen} onClose={() => { blurActiveElement(); setApiOpen(false); }} fullWidth maxWidth="md">
+        <DialogTitle>{editingApi ? "Edit API" : "Add API"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2.5} sx={{ pt: 1 }}>
+            <TextField
+              label="Name"
+              value={apiForm.name}
+              onChange={(e) => setApiForm((prev) => ({ ...prev, name: e.target.value }))}
+              error={Boolean(apiErrors.name)}
+              helperText={apiErrors.name}
+            />
+            <TextField
+              label="Description"
+              value={apiForm.description}
+              onChange={(e) => setApiForm((prev) => ({ ...prev, description: e.target.value }))}
+              multiline
+              minRows={2}
+            />
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Method"
+                  value={apiForm.method}
+                  onChange={(e) => setApiForm((prev) => ({ ...prev, method: e.target.value as "GET" | "POST" }))}
+                  error={Boolean(apiErrors.method)}
+                  helperText={apiErrors.method}
+                >
+                  <MenuItem value="GET">GET</MenuItem>
+                  <MenuItem value="POST">POST</MenuItem>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Auth Type"
+                  value={apiForm.authType}
+                  onChange={(e) => setAuthType(e.target.value as ApiAuthType)}
+                  error={Boolean(apiErrors.authType)}
+                  helperText={apiErrors.authType}
+                >
+                  <MenuItem value="NONE">NONE</MenuItem>
+                  <MenuItem value="API_KEY_HEADER">API_KEY_HEADER</MenuItem>
+                  <MenuItem value="BEARER_TOKEN">BEARER_TOKEN</MenuItem>
+                  <MenuItem value="BASIC_AUTH">BASIC_AUTH</MenuItem>
+                  <MenuItem value="SESSION_LOGIN">SESSION_LOGIN</MenuItem>
+                  <MenuItem value="OAUTH2">OAUTH2</MenuItem>
+                </TextField>
+              </Grid>
+            </Grid>
+            <TextField
+              label="Base URL"
+              value={apiForm.baseUrl}
+              onChange={(e) => setApiForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
+              error={Boolean(apiErrors.baseUrl)}
+              helperText={apiErrors.baseUrl}
+            />
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Endpoint"
+                  value={apiForm.endpoint}
+                  onChange={(e) => setApiForm((prev) => ({ ...prev, endpoint: e.target.value }))}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Query Param"
+                  value={apiForm.method_config.queryParam}
+                  onChange={(e) =>
+                    setApiForm((prev) => ({
+                      ...prev,
+                      method_config: { ...prev.method_config, queryParam: e.target.value },
+                    }))
+                  }
+                  error={Boolean(apiErrors["method_config.queryParam"])}
+                  helperText={apiErrors["method_config.queryParam"]}
+                />
+              </Grid>
+            </Grid>
+
+            {apiForm.authType !== "NONE" ? (
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="subtitle1" fontWeight={800} mb={2}>
+                    Auth Config
+                  </Typography>
+                  <Grid container spacing={2}>
+                    {apiForm.authType === "API_KEY_HEADER" ? (
+                      <>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Header Key"
+                            value={apiForm.auth_config.key ?? ""}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, auth_config: { ...prev.auth_config, key: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["auth_config.key"])}
+                            helperText={apiErrors["auth_config.key"]}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Header Value"
+                            value={apiForm.auth_config.value ?? ""}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, auth_config: { ...prev.auth_config, value: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["auth_config.value"])}
+                            helperText={apiErrors["auth_config.value"]}
+                          />
+                        </Grid>
+                      </>
+                    ) : null}
+                    {apiForm.authType === "BEARER_TOKEN" ? (
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          label="Bearer Token"
+                          value={apiForm.auth_config.token ?? ""}
+                          onChange={(e) =>
+                            setApiForm((prev) => ({ ...prev, auth_config: { ...prev.auth_config, token: e.target.value } }))
+                          }
+                          error={Boolean(apiErrors["auth_config.token"])}
+                          helperText={apiErrors["auth_config.token"]}
+                        />
+                      </Grid>
+                    ) : null}
+                    {apiForm.authType === "BASIC_AUTH" ? (
+                      <>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Username"
+                            value={apiForm.auth_config.username ?? ""}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, auth_config: { ...prev.auth_config, username: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["auth_config.username"])}
+                            helperText={apiErrors["auth_config.username"]}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            type="password"
+                            label="Password"
+                            value={apiForm.auth_config.password ?? ""}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, auth_config: { ...prev.auth_config, password: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["auth_config.password"])}
+                            helperText={apiErrors["auth_config.password"]}
+                          />
+                        </Grid>
+                      </>
+                    ) : null}
+                    {apiForm.authType === "SESSION_LOGIN" ? (
+                      <>
+                        <Grid item xs={12}>
+                          <TextField
+                            fullWidth
+                            label="Login URL"
+                            value={apiForm.session_config.loginUrl ?? ""}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, session_config: { ...prev.session_config, loginUrl: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["session_config.loginUrl"])}
+                            helperText={apiErrors["session_config.loginUrl"]}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Username Field"
+                            value={apiForm.session_config.usernameField ?? ""}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, session_config: { ...prev.session_config, usernameField: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["session_config.usernameField"])}
+                            helperText={apiErrors["session_config.usernameField"]}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Password Field"
+                            value={apiForm.session_config.passwordField ?? ""}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, session_config: { ...prev.session_config, passwordField: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["session_config.passwordField"])}
+                            helperText={apiErrors["session_config.passwordField"]}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            select
+                            fullWidth
+                            label="Session Policy"
+                            value={apiForm.session_config.sessionPolicy ?? "AUTO_REFRESH"}
+                            onChange={(e) =>
+                              setApiForm((prev) => ({ ...prev, session_config: { ...prev.session_config, sessionPolicy: e.target.value } }))
+                            }
+                            error={Boolean(apiErrors["session_config.sessionPolicy"])}
+                            helperText={apiErrors["session_config.sessionPolicy"]}
+                          >
+                            <MenuItem value="AUTO_REFRESH">AUTO_REFRESH</MenuItem>
+                            <MenuItem value="MANUAL">MANUAL</MenuItem>
+                          </TextField>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={Boolean(apiForm.session_config.captchaEnabled)}
+                                onChange={(e) =>
+                                  setApiForm((prev) => ({
+                                    ...prev,
+                                    session_config: { ...prev.session_config, captchaEnabled: e.target.checked },
+                                  }))
+                                }
+                              />
+                            }
+                            label="Captcha enabled"
+                          />
+                        </Grid>
+                      </>
+                    ) : null}
+                  </Grid>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Credits Per Search"
+                  value={apiForm.creditsPerSearch}
+                  onChange={(e) => setApiForm((prev) => ({ ...prev, creditsPerSearch: Number(e.target.value) }))}
+                  error={Boolean(apiErrors.creditsPerSearch)}
+                  helperText={apiErrors.creditsPerSearch}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Sample Query"
+                  value={apiForm.sampleQuery}
+                  onChange={(e) => setApiForm((prev) => ({ ...prev, sampleQuery: e.target.value }))}
+                />
+              </Grid>
+            </Grid>
+            <FormControlLabel
+              control={<Checkbox checked={apiForm.status} onChange={(e) => setApiForm((prev) => ({ ...prev, status: e.target.checked }))} />}
+              label="API enabled"
+            />
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="subtitle1" fontWeight={800} mb={1.5}>
+                  Rate Limits
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Max / Minute"
+                      value={apiForm.rate_limit_config.maxPerMinute ?? ""}
+                      onChange={(e) =>
+                        setApiForm((prev) => ({
+                          ...prev,
+                          rate_limit_config: {
+                            ...prev.rate_limit_config,
+                            maxPerMinute: e.target.value === "" ? null : Number(e.target.value),
+                          },
+                        }))
+                      }
+                      error={Boolean(apiErrors["rate_limit_config.maxPerMinute"])}
+                      helperText={apiErrors["rate_limit_config.maxPerMinute"] || "Optional"}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Max / Day"
+                      value={apiForm.rate_limit_config.maxPerDay ?? ""}
+                      onChange={(e) =>
+                        setApiForm((prev) => ({
+                          ...prev,
+                          rate_limit_config: {
+                            ...prev.rate_limit_config,
+                            maxPerDay: e.target.value === "" ? null : Number(e.target.value),
+                          },
+                        }))
+                      }
+                      error={Boolean(apiErrors["rate_limit_config.maxPerDay"])}
+                      helperText={apiErrors["rate_limit_config.maxPerDay"] || "Optional"}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Cooldown (sec)"
+                      value={apiForm.rate_limit_config.cooldownSeconds ?? ""}
+                      onChange={(e) =>
+                        setApiForm((prev) => ({
+                          ...prev,
+                          rate_limit_config: {
+                            ...prev.rate_limit_config,
+                            cooldownSeconds: e.target.value === "" ? null : Number(e.target.value),
+                          },
+                        }))
+                      }
+                      error={Boolean(apiErrors["rate_limit_config.cooldownSeconds"])}
+                      helperText={apiErrors["rate_limit_config.cooldownSeconds"] || "Optional"}
+                    />
+                  </Grid>
+                </Grid>
+              </CardContent>
+            </Card>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="subtitle1" fontWeight={800} mb={0.75}>
+                  Service Selection
+                </Typography>
+                <Typography variant="body2" color="text.secondary" mb={2}>
+                  Select exact service names for this API. These links are used directly, so no guessed mapping is needed.
+                </Typography>
+                <Stack spacing={1.25}>
+                  {services.map((service) => {
+                    const link = apiForm.serviceLinks.find((item) => item.serviceId === service.id) ?? {
+                      serviceId: service.id,
+                      enabled: false,
+                      priority: 1,
+                    };
                     return (
-                      <Tr key={x.id} _hover={{ bg: "whiteAlpha.50" }} cursor="pointer" onClick={() => openApiDrawer(x)}>
-                        <Td>
-                          <Text fontWeight="800">{x.name}</Text>
-                          <Text fontSize="xs" opacity={0.75} noOfLines={1}>
-                            {x.baseUrl}{x.endpoint}
-                          </Text>
-                        </Td>
-                        <Td>
-                          <Badge borderRadius="999px" px={2} py={1}>
-                            {x.method}
-                          </Badge>
-                        </Td>
-                        <Td isNumeric>{x.creditsPerSearch ?? 1}</Td>
-                        <Td>
-                          <Badge colorScheme={assignedCount ? "purple" : "gray"} borderRadius="999px" px={3} py={1}>
-                            {assignedCount} services
-                          </Badge>
-                        </Td>
-                        <Td>
-                          {isApiActive(x) ? <Badge colorScheme="green">Active</Badge> : <Badge colorScheme="red">Inactive</Badge>}
-                        </Td>
-                      </Tr>
+                      <Box
+                        key={service.id}
+                        sx={{
+                          border: `1px solid ${ui.surface.border}`,
+                          borderRadius: 2,
+                          px: 1.5,
+                          py: 1,
+                        }}
+                      >
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }}>
+                          <Box sx={{ minWidth: 0 }}>
+                            <FormControlLabel
+                              control={<Checkbox checked={link.enabled} onChange={(e) => setApiServiceLinkEnabled(service.id, e.target.checked)} />}
+                              label={service.name}
+                            />
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block", ml: 4 }}>
+                              {service.type ?? "Search"} | {service.status ? "Active" : "Inactive"}
+                            </Typography>
+                          </Box>
+                          <TextField
+                            size="small"
+                            type="number"
+                            label="Priority"
+                            value={link.priority}
+                            disabled={!link.enabled}
+                            onChange={(e) => setApiServiceLinkPriority(service.id, Number(e.target.value))}
+                            sx={{ width: { xs: "100%", md: 110 } }}
+                          />
+                        </Stack>
+                      </Box>
                     );
                   })}
-                </Tbody>
-              </Table>
-            )}
-          </Box>
-
-          {/* Right: Service Matrix */}
-          <Box
-            borderRadius="2xl"
-            borderWidth="1px"
-            borderColor="whiteAlpha.200"
-            bg="whiteAlpha.50"
-            overflow="hidden"
-          >
-            <Box px={5} py={4} borderBottom="1px solid rgba(255,255,255,0.08)">
-              <Heading size="sm">Service Matrix</Heading>
-              <Text fontSize="sm" opacity={0.75} mt={1}>
-                Toggle API availability per service. (Horizontal scroll enabled.)
-              </Text>
-            </Box>
-
-            {loading ? (
-              <Flex p={10} justify="center">
-                <Spinner size="lg" />
-              </Flex>
-            ) : services.length === 0 || apis.length === 0 ? (
-              <Box p={10} textAlign="center">
-                <Text color="whiteAlpha.700">No services or APIs configured yet.</Text>
-              </Box>
-            ) : (
-              <Box p={4}>
-                <VirtualServiceMatrix
-                  services={services}
-                  apis={filteredApis}
-                  saving={saving}
-                  onToggle={(svc, apiId) => toggleMatrix(svc, apiId)}
+                </Stack>
+              </CardContent>
+            </Card>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="subtitle1" fontWeight={800} mb={2}>
+                  Unified Search Support
+                </Typography>
+                <Grid container spacing={1}>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.supportsCnic} onChange={(e) => setApiForm((prev) => ({ ...prev, supportsCnic: e.target.checked }))} />}
+                      label="CNIC"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.supportsPhone} onChange={(e) => setApiForm((prev) => ({ ...prev, supportsPhone: e.target.checked }))} />}
+                      label="Mobile"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.supportsEngine} onChange={(e) => setApiForm((prev) => ({ ...prev, supportsEngine: e.target.checked }))} />}
+                      label="Engine"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.supportsChassis} onChange={(e) => setApiForm((prev) => ({ ...prev, supportsChassis: e.target.checked }))} />}
+                      label="Chassis"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.supportsReg} onChange={(e) => setApiForm((prev) => ({ ...prev, supportsReg: e.target.checked }))} />}
+                      label="Vehicle Reg"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.supportsLicense} onChange={(e) => setApiForm((prev) => ({ ...prev, supportsLicense: e.target.checked }))} />}
+                      label="License"
+                    />
+                  </Grid>
+                </Grid>
+                <TextField
+                  fullWidth
+                  sx={{ mt: 1 }}
+                  label="Custom Regex"
+                  value={apiForm.customRegex}
+                  onChange={(e) => setApiForm((prev) => ({ ...prev, customRegex: e.target.value }))}
+                  helperText="Optional. Used when this source should match a custom query pattern."
                 />
-                <Box pt={3} opacity={0.75} fontSize="xs">
-                  Virtualized matrix: supports many APIs smoothly (horizontal + vertical windowing).
-                </Box>
-              </Box>
-            )}
-          </Box>
-        </SimpleGrid>
-      </Box>
+              </CardContent>
+            </Card>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="subtitle1" fontWeight={800} mb={1.5}>
+                  Role Access
+                </Typography>
+                <Grid container spacing={1}>
+                  <Grid item xs={12} sm={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.allowUser} onChange={(e) => setApiForm((prev) => ({ ...prev, allowUser: e.target.checked }))} />}
+                      label="User"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.allowReseller} onChange={(e) => setApiForm((prev) => ({ ...prev, allowReseller: e.target.checked }))} />}
+                      label="Reseller"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <FormControlLabel
+                      control={<Checkbox checked={apiForm.allowAdmin} onChange={(e) => setApiForm((prev) => ({ ...prev, allowAdmin: e.target.checked }))} />}
+                      label="Admin"
+                    />
+                  </Grid>
+                </Grid>
+              </CardContent>
+            </Card>
+            <Divider />
+            <Typography variant="subtitle1" fontWeight={800}>
+              Live Test Response
+            </Typography>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField fullWidth label="Test Query" value={testQuery} onChange={(e) => setTestQuery(e.target.value)} />
+              <Button
+                startIcon={<ScienceRoundedIcon />}
+                variant="outlined"
+                onClick={runLiveTest}
+                disabled={!editingApi || testingApi}
+              >
+                Probe
+              </Button>
+            </Stack>
+            <TextField fullWidth multiline minRows={8} value={testResponse} placeholder="Live response will appear here." />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { blurActiveElement(); setApiOpen(false); }}>Cancel</Button>
+          <Button variant="contained" onClick={saveApi} disabled={saving}>
+            Save API
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-      <ApiAssignDrawer
-        isOpen={isOpen}
-        onClose={onClose}
-        apiItem={activeApi}
-        services={services}
-        assignedServiceIds={activeApi ? Array.from(serviceIdsByApi.get(activeApi.id) ?? new Set()) : []}
-        saving={saving}
-        onSave={saveApiAssignments}
-      />
-    </Layout>
-  );
-}
-
-function VirtualServiceMatrix(props: {
-  services: ServiceItem[];
-  apis: ApiItem[];
-  saving: boolean;
-  onToggle: (svc: ServiceItem, apiId: string) => void;
-}) {
-  const { services, apis, saving, onToggle } = props;
-  const COL_W = 160;
-  const ROW_H = 56;
-  const HEADER_H = 46;
-  const LEFT_W = 300;
-  const OVERSCAN_COLS = 2;
-  const OVERSCAN_ROWS = 6;
-
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const rightRef = useRef<HTMLDivElement | null>(null);
-  const [viewport, setViewport] = useState({ w: 900, h: 560 });
-  const [scroll, setScroll] = useState({ left: 0, top: 0 });
-
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
-      setViewport({ w: Math.max(360, r.width), h: Math.max(360, r.height) });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const bodyH = Math.max(240, viewport.h - HEADER_H);
-  const rightW = Math.max(240, viewport.w - LEFT_W);
-
-  const totalRightW = apis.length * COL_W;
-  const totalBodyH = services.length * ROW_H;
-
-  const visibleCols = Math.max(1, Math.ceil(rightW / COL_W));
-  const startCol = Math.max(0, Math.floor(scroll.left / COL_W) - OVERSCAN_COLS);
-  const endCol = Math.min(apis.length - 1, startCol + visibleCols + OVERSCAN_COLS * 2);
-  const colSlice = apis.slice(startCol, endCol + 1);
-
-  const visibleRows = Math.max(1, Math.ceil(bodyH / ROW_H));
-  const startRow = Math.max(0, Math.floor(scroll.top / ROW_H) - OVERSCAN_ROWS);
-  const endRow = Math.min(services.length - 1, startRow + visibleRows + OVERSCAN_ROWS * 2);
-  const rowSlice = services.slice(startRow, endRow + 1);
-
-  return (
-    <Box ref={wrapRef} height="560px" overflow="hidden">
-      <HStack align="stretch" spacing={0} height="100%">
-        {/* Left (services) */}
-        <Box width={`${LEFT_W}px`} borderRight="1px solid rgba(255,255,255,0.08)">
-          <Box
-            height={`${HEADER_H}px`}
-            bg="rgba(18,18,24,0.92)"
-            borderBottom="1px solid rgba(255,255,255,0.08)"
-            display="flex"
-            alignItems="center"
-            px={4}
-            fontWeight={900}
-          >
-            Service
-          </Box>
-          <Box position="relative" height={`${bodyH}px`} overflow="hidden">
-            <Box position="relative" height={`${totalBodyH}px`}>
-              {rowSlice.map((svc, i) => {
-                const rowIndex = startRow + i;
-                const top = rowIndex * ROW_H - scroll.top;
-                const set = new Set((svc.serviceApis || []).map((x) => x.apiId));
-                return (
-                  <Box
-                    key={svc.id}
-                    position="absolute"
-                    top={`${top}px`}
-                    left={0}
-                    right={0}
-                    height={`${ROW_H}px`}
-                    borderBottom="1px solid rgba(255,255,255,0.06)"
-                    bg="rgba(18,18,24,0.86)"
-                    px={4}
-                    display="flex"
-                    alignItems="center"
-                  >
-                    <HStack justify="space-between" w="full">
-                      <Box>
-                        <Text fontWeight="800" noOfLines={1}>{svc.name}</Text>
-                        <HStack spacing={2} mt={1}>
-                          <Badge colorScheme={svc.status ? "green" : "red"} borderRadius="999px">
-                            {svc.status ? "Online" : "Offline"}
-                          </Badge>
-                          {svc.type ? <Badge borderRadius="999px">{svc.type}</Badge> : null}
-                        </HStack>
-                      </Box>
-                      <Badge colorScheme="purple" borderRadius="999px" px={3} py={1}>
-                        {set.size}
-                      </Badge>
-                    </HStack>
-                  </Box>
-                );
-              })}
-            </Box>
-          </Box>
-        </Box>
-
-        {/* Right (APIs) */}
-        <Box flex="1" minW="240px">
-          <Box
-            height={`${HEADER_H}px`}
-            bg="rgba(18,18,24,0.92)"
-            borderBottom="1px solid rgba(255,255,255,0.08)"
-            position="relative"
-            overflow="hidden"
-          >
-            <Box position="absolute" left={`${-scroll.left}px`} top={0} height="100%" width={`${totalRightW}px`}>
-              {colSlice.map((a, idx) => {
-                const colIndex = startCol + idx;
-                const left = colIndex * COL_W;
-                return (
-                  <Box
-                    key={a.id}
-                    position="absolute"
-                    left={`${left}px`}
-                    top={0}
-                    width={`${COL_W}px`}
-                    height="100%"
-                    px={3}
-                    display="flex"
-                    alignItems="center"
-                  >
-                    <Text fontSize="xs" fontWeight={800} noOfLines={1} maxW={`${COL_W - 16}px`}>
-                      {a.name}
-                    </Text>
-                  </Box>
-                );
-              })}
-            </Box>
-          </Box>
-
-          <Box
-            ref={rightRef}
-            height={`${bodyH}px`}
-            overflow="auto"
-            onScroll={(e) => {
-              const t = e.currentTarget;
-              setScroll({ left: t.scrollLeft, top: t.scrollTop });
-            }}
-          >
-            <Box position="relative" width={`${totalRightW}px`} height={`${totalBodyH}px`}>
-              {rowSlice.map((svc, r) => {
-                const rowIndex = startRow + r;
-                const top = rowIndex * ROW_H;
-                const set = new Set((svc.serviceApis || []).map((x) => x.apiId));
-                return (
-                  <Box key={svc.id}>
-                    {colSlice.map((a, c) => {
-                      const colIndex = startCol + c;
-                      const left = colIndex * COL_W;
-                      return (
-                        <Box
-                          key={`${svc.id}-${a.id}`}
-                          position="absolute"
-                          left={`${left}px`}
-                          top={`${top}px`}
-                          width={`${COL_W}px`}
-                          height={`${ROW_H}px`}
-                          borderBottom="1px solid rgba(255,255,255,0.06)"
-                          display="flex"
-                          alignItems="center"
-                          justifyContent="center"
-                        >
-                          <Checkbox
-                            isChecked={set.has(a.id)}
-                            onChange={() => onToggle(svc, a.id)}
-                            isDisabled={saving}
-                          />
-                        </Box>
-                      );
-                    })}
-                  </Box>
-                );
-              })}
-            </Box>
-          </Box>
-        </Box>
-      </HStack>
-    </Box>
-  );
-}
-
-function ApiAssignDrawer(props: {
-  isOpen: boolean;
-  onClose: () => void;
-  apiItem: ApiItem | null;
-  services: ServiceItem[];
-  assignedServiceIds: string[];
-  saving: boolean;
-  onSave: (apiId: string, serviceIds: string[]) => Promise<void>;
-}) {
-  const { isOpen, onClose, apiItem, services, assignedServiceIds, saving, onSave } = props;
-  const [selected, setSelected] = useState<string[]>([]);
-
-  useEffect(() => {
-    setSelected(assignedServiceIds);
-  }, [assignedServiceIds, apiItem?.id]);
-
-  if (!apiItem) return null;
-
-  return (
-    <Drawer isOpen={isOpen} placement="right" onClose={onClose} size="md">
-      <DrawerOverlay />
-      <DrawerContent bg="rgba(12,12,18,0.92)" borderLeft="1px solid rgba(255,255,255,0.10)">
-        <DrawerCloseButton />
-        <DrawerHeader>
-          <VStack align="start" spacing={1}>
-            <Text fontWeight="900">Assign API to Services</Text>
-            <Text fontSize="sm" opacity={0.75}>
-              {apiItem.name}
-            </Text>
-          </VStack>
-        </DrawerHeader>
-        <DrawerBody>
-          <Box borderRadius="2xl" borderWidth="1px" borderColor="whiteAlpha.200" bg="whiteAlpha.50" p={4}>
-            <Text fontSize="sm" opacity={0.8} mb={3}>
-              Select services where this API should be enabled.
-            </Text>
-            <VStack align="stretch" spacing={2} maxH="60vh" overflow="auto" pr={1}>
-              {services
-                .slice()
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map((svc) => {
-                  const checked = selected.includes(svc.id);
-                  return (
-                    <HStack key={svc.id} justify="space-between" p={2} borderRadius="xl" _hover={{ bg: "whiteAlpha.50" }}>
-                      <Box>
-                        <Text fontWeight="800">{svc.name}</Text>
-                        <HStack spacing={2} mt={0.5}>
-                          <Badge colorScheme={svc.status ? "green" : "red"} borderRadius="999px">
-                            {svc.status ? "Online" : "Offline"}
-                          </Badge>
-                          {svc.type ? <Badge borderRadius="999px">{svc.type}</Badge> : null}
-                        </HStack>
-                      </Box>
-                      <Checkbox
-                        isChecked={checked}
-                        onChange={(e) => {
-                          const next = new Set(selected);
-                          if (e.target.checked) next.add(svc.id);
-                          else next.delete(svc.id);
-                          setSelected(Array.from(next));
+      <Dialog open={serviceOpen} onClose={() => { blurActiveElement(); setServiceOpen(false); }} fullWidth maxWidth="sm">
+        <DialogTitle>{editingSvc ? "Edit Service" : "Add Service"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2.5} sx={{ pt: 1 }}>
+            <TextField label="Name" value={svcForm.name} onChange={(e) => setSvcForm((prev) => ({ ...prev, name: e.target.value }))} />
+            <TextField
+              label="Description"
+              value={svcForm.description}
+              onChange={(e) => setSvcForm((prev) => ({ ...prev, description: e.target.value }))}
+            />
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField label="Icon" value={svcForm.icon} onChange={(e) => setSvcForm((prev) => ({ ...prev, icon: e.target.value }))} fullWidth />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField label="Type" value={svcForm.type} onChange={(e) => setSvcForm((prev) => ({ ...prev, type: e.target.value }))} fullWidth />
+              </Grid>
+            </Grid>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Default Cost"
+                  value={svcForm.defaultCost}
+                  onChange={(e) => setSvcForm((prev) => ({ ...prev, defaultCost: Number(e.target.value) }))}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControlLabel
+                  control={<Checkbox checked={svcForm.status} onChange={(e) => setSvcForm((prev) => ({ ...prev, status: e.target.checked }))} />}
+                  label="Service enabled"
+                />
+              </Grid>
+            </Grid>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="subtitle1" fontWeight={800} mb={0.75}>
+                  Unified Search API Sources
+                </Typography>
+                <Typography variant="body2" color="text.secondary" mb={2}>
+                  Enable only those APIs that should run for this service. Priority `1` runs first in the configured order.
+                </Typography>
+                <Stack spacing={1.25}>
+                  {apis.map((apiItem) => {
+                    const link = svcForm.links.find((item) => item.apiId === apiItem.id) ?? {
+                      apiId: apiItem.id,
+                      enabled: false,
+                      priority: 1,
+                    };
+                    return (
+                      <Box
+                        key={apiItem.id}
+                        sx={{
+                          border: `1px solid ${ui.surface.border}`,
+                          borderRadius: 2,
+                          px: 1.5,
+                          py: 1,
                         }}
-                      />
-                    </HStack>
-                  );
-                })}
-            </VStack>
-          </Box>
-
-          <HStack mt={5} justify="space-between">
-            <Button variant="outline" borderRadius="999px" onClick={onClose} isDisabled={saving}>
-              Cancel
-            </Button>
-            <Button
-              colorScheme="blue"
-              borderRadius="999px"
-              isLoading={saving}
-              onClick={() => onSave(apiItem.id, selected)}
-            >
-              Save Assignments
-            </Button>
-          </HStack>
-        </DrawerBody>
-      </DrawerContent>
-    </Drawer>
+                      >
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }}>
+                          <Box sx={{ minWidth: 0 }}>
+                            <FormControlLabel
+                              control={<Checkbox checked={link.enabled} onChange={(e) => setServiceLinkEnabled(apiItem.id, e.target.checked)} />}
+                              label={apiItem.name}
+                            />
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block", ml: 4 }}>
+                              {apiItem.method} | {apiItem.creditsPerSearch ?? 1} credits | {apiItem.baseUrl}{apiItem.endpoint}
+                            </Typography>
+                          </Box>
+                          <TextField
+                            size="small"
+                            type="number"
+                            label="Priority"
+                            value={link.priority}
+                            disabled={!link.enabled}
+                            onChange={(e) => setServiceLinkPriority(apiItem.id, Number(e.target.value))}
+                            sx={{ width: { xs: "100%", md: 110 } }}
+                          />
+                        </Stack>
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              </CardContent>
+            </Card>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { blurActiveElement(); setServiceOpen(false); }}>Cancel</Button>
+          <Button variant="contained" onClick={saveService} disabled={saving}>
+            Save Service
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Stack>
   );
 }

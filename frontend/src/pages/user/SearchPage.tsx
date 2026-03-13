@@ -1,12 +1,16 @@
 import React, { useMemo, useState } from "react";
 import { api } from "../../app/api";
+import { issueSearchToken } from "../../app/searchToken";
 import { useNavigate } from "react-router-dom";
 import { downloadClientPdf, downloadCsv } from "../../utils/export";
+import { isRenderableResult, normalizeResultData } from "./components/merge";
+import { useAuth } from "../../app/auth/useAuth";
 
 type Tab = "cnic" | "mobile";
 
 export default function SearchPage() {
   const nav = useNavigate();
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("cnic");
   const [cnic, setCnic] = useState("");
   const [mobile, setMobile] = useState("");
@@ -15,6 +19,7 @@ export default function SearchPage() {
   const [resp, setResp] = useState<any>(null);
 
   const query = useMemo(() => (tab === "cnic" ? cnic : mobile), [tab, cnic, mobile]);
+  const homePath = user?.role === "ADMIN" ? "/admin/dashboard" : user?.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard";
 
   function validate(): string | null {
     if (!query.trim()) return "Please enter a value.";
@@ -37,7 +42,8 @@ export default function SearchPage() {
     setBusy(true);
     try {
       const q = tab === "cnic" ? cnic.replace(/[^0-9]/g, "") : mobile.trim();
-      const r = await api.get("/search/unified", { params: { query: q } });
+      const searchToken = await issueSearchToken();
+      const r = await api.get("/search/unified", { params: { query: q }, headers: { "x-search-token": searchToken } });
       setResp(r.data);
     } catch (e: any) {
       setErr(e?.response?.data?.message ?? "Search failed");
@@ -129,7 +135,7 @@ export default function SearchPage() {
               </button>
 
               <button
-                onClick={() => nav("/app")}
+                onClick={() => nav(homePath)}
                 className="px-7 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-lg shadow-xl transition"
               >
                 🏠 Dashboard
@@ -155,6 +161,10 @@ export default function SearchPage() {
           {/* Results */}
           {resp && (
             <div className="mt-8 space-y-5">
+              {(() => {
+                const visibleResults = (resp.results || []).filter((item: any) => isRenderableResult(item));
+                return (
+                  <>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-slate-300">
                   Query: <b className="text-white">{resp.querySent}</b> • Detected: <b className="text-white">{resp.detectedType}</b> • Cost: <b className="text-white">{resp.cost}</b>
@@ -169,8 +179,8 @@ export default function SearchPage() {
                         filename: `${resp.querySent || "elookup"}-client.pdf`,
                         title: "Elookup Intelligence Report",
                         subtitle: `Query: ${resp.querySent} • Detected: ${resp.detectedType}`,
-                        sections: [{ heading: "API Results", rows: resp.results || [] }],
-                        rawJson: resp,
+                        sections: [{ heading: "API Results", rows: visibleResults }],
+                        rawJson: { ...resp, results: visibleResults },
                       })
                     }
                     className="px-5 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold"
@@ -178,7 +188,7 @@ export default function SearchPage() {
                     📄 Client PDF
                   </button>
                   <button
-                    onClick={() => downloadCsv(`${resp.querySent || "elookup"}-results.csv`, resp.results || [])}
+                    onClick={() => downloadCsv(`${resp.querySent || "elookup"}-results.csv`, visibleResults)}
                     className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-extrabold"
                   >
                     ⬇️ CSV
@@ -187,10 +197,13 @@ export default function SearchPage() {
               </div>
 
               <div className="grid gap-4">
-                {resp.results?.map((r: any) => (
+                {visibleResults.map((r: any) => (
                   <ResultCard key={r.apiId} item={r} />
                 ))}
               </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -208,8 +221,8 @@ export default function SearchPage() {
 }
 
 function ResultCard({ item }: { item: any }) {
-  const ok = !!item.ok;
-  const content = ok ? item.data : { error: item.error };
+  const content = normalizeResultData(item.data);
+  if (!content) return null;
 
   async function copyAll() {
     await navigator.clipboard.writeText(JSON.stringify(content, null, 2));
@@ -221,10 +234,10 @@ function ResultCard({ item }: { item: any }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="font-extrabold text-lg">{item.apiName}</div>
-          <div className="text-xs text-slate-400">Standardized view will be added via Response Mapping in API Manager.</div>
+          <div className="text-xs text-slate-400">Visible fields only. Empty or failed payloads are hidden automatically.</div>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-extrabold border ${ok ? "bg-emerald-500/15 text-emerald-200 border-emerald-500/25" : "bg-red-500/15 text-red-200 border-red-500/25"}`}>
-          {ok ? "SUCCESS" : "ERROR"}
+        <span className="px-3 py-1 rounded-full text-xs font-extrabold border bg-emerald-500/15 text-emerald-200 border-emerald-500/25">
+          SUCCESS
         </span>
       </div>
 

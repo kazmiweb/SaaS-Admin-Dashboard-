@@ -15,3 +15,28 @@ backend/dist
 
 # temp
 .DS_Store
+
+# local editor/project noise
+.vscode/
+*.swp
+*.swo
+
+# ad-hoc backup artifacts from patch scripts
+_patch_backups/
+.backup_*/
+*.bak
+*.bak*
+*.bak.*
+*.save
+*.orig
+
+# accidental one-off files
+ERROR
+\[build
+tsc
+elookup-backend@1.0.0
+
+# root-level one-off automation artifacts
+/apply_fixes_step2.sh
+/setup_api_services_step1_2.sh
+/package-lock.json

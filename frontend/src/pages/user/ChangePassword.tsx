@@ -1,8 +1,12 @@
 import React, { useState } from "react";
 import { Box, Button, Heading, Input, Stack, useToast } from "@chakra-ui/react";
+import { useTheme as useMuiTheme } from "@mui/material";
 import { api } from "../../app/api";
+import { getDashboardUi } from "../../dashboard/uiTokens";
 
 export default function ChangePassword() {
+  const muiTheme = useMuiTheme();
+  const ui = getDashboardUi(muiTheme.palette.mode);
   const toast = useToast();
   const [currentPassword, setCurrent] = useState("");
   const [newPassword, setNew] = useState("");
@@ -27,12 +31,12 @@ export default function ChangePassword() {
   }
 
   return (
-    <Box>
+    <Box color={ui.text.primary}>
       <Heading size="lg" mb={4}>Change Password</Heading>
-      <Box bg="rgba(255,255,255,0.06)" border="1px solid rgba(255,255,255,0.08)" borderRadius="18px" p={{ base: 4, md: 6 }} maxW="520px">
+      <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="18px" p={{ base: 4, md: 6 }} maxW="520px">
         <Stack spacing={4}>
-          <Input type="password" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrent(e.target.value)} borderRadius="14px" />
-          <Input type="password" placeholder="New password" value={newPassword} onChange={(e) => setNew(e.target.value)} borderRadius="14px" />
+          <Input type="password" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrent(e.target.value)} borderRadius="14px" bg={ui.surface.input} border={`1px solid ${ui.surface.inputBorder}`} color={ui.text.primary} _placeholder={{ color: ui.text.muted }} />
+          <Input type="password" placeholder="New password" value={newPassword} onChange={(e) => setNew(e.target.value)} borderRadius="14px" bg={ui.surface.input} border={`1px solid ${ui.surface.inputBorder}`} color={ui.text.primary} _placeholder={{ color: ui.text.muted }} />
           <Button colorScheme="blue" borderRadius="999px" onClick={save} isLoading={saving}>Update</Button>
         </Stack>
       </Box>

@@ -44,29 +44,45 @@ enum QueryType {
   CUSTOM
 }
 
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportMessageSender {
+  USER
+  ADMIN
+  SYSTEM
+}
+
 model User {
-  id                   String     @id @default(cuid())
-  email                String     @unique
-  name                 String
-  passwordHash         String
-  role                 UserRole   @default(USER)
-  status               UserStatus @default(ACTIVE)
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String
+  passwordHash String
+  role         UserRole   @default(USER)
+  status       UserStatus @default(ACTIVE)
 
   // Single-device enforcement (USER/RESELLER)
-  deviceId             String?
-  deviceBoundAt        DateTime?
+  deviceId      String?
+  deviceBoundAt DateTime?
 
-  credits              Int        @default(0)
+  credits              Int       @default(0)
   expireAt             DateTime?
   acceptedDisclaimerAt DateTime?
-  theme                String     @default("light")
+  theme                String    @default("light")
+  billingType          String    @default("PAID") // PAID|FREE|DEMO
+  revenueExcluded      Boolean   @default(false)
+  monthlyPackageCoins  Int       @default(0)
 
-  resellerId           String?
-  reseller             User?      @relation("ResellerUsers", fields: [resellerId], references: [id])
-  createdUsers         User[]     @relation("ResellerUsers")
+  resellerId   String?
+  reseller     User?   @relation("ResellerUsers", fields: [resellerId], references: [id])
+  createdUsers User[]  @relation("ResellerUsers")
 
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   refreshTokens        RefreshToken[]
   apiKeys              ApiKey[]
@@ -75,19 +91,22 @@ model User {
   accessLogs           AccessLog[]
   userServiceOverrides UserServiceAccess[]
   transactions         Transaction[]
-  adminAudits          AdminAudit[] @relation("AdminAuditActor")
-  creditLogsAsActor    CreditLog[]  @relation("CreditLogActor")
-
+  adminAudits          AdminAudit[]        @relation("AdminAuditActor")
+  creditLogsAsActor    CreditLog[]         @relation("CreditLogActor")
+  notifications        Notification[]
+  supportTickets       SupportTicket[]     @relation("SupportTicketOwner")
+  assignedTickets      SupportTicket[]     @relation("SupportTicketAssignee")
+  supportMessages      SupportMessage[]    @relation("SupportMessageAuthor")
 }
 
 model ApiKey {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
-  user       User     @relation(fields: [userId], references: [id])
+  user       User      @relation(fields: [userId], references: [id])
   name       String
-  jti        String   @unique
-  scopes     String   @default("search:read")
-  createdAt  DateTime @default(now())
+  jti        String    @unique
+  scopes     String    @default("search:read")
+  createdAt  DateTime  @default(now())
   lastUsedAt DateTime?
   revokedAt  DateTime?
 
@@ -95,23 +114,23 @@ model ApiKey {
 }
 
 model RefreshToken {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  tokenHash  String
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  createdAt  DateTime @default(now())
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
 }
 
 model OTPVerification {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   email     String
   codeHash  String
-  purpose   String   // SIGNUP or CHANGE_EMAIL
+  purpose   String // SIGNUP or CHANGE_EMAIL
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([email, purpose])
 }
@@ -120,109 +139,109 @@ model Service {
   id          String   @id @default(cuid())
   name        String   @unique
   description String?
-  icon        String?  // e.g. "fa-magnifying-glass"
+  icon        String? // e.g. "fa-magnifying-glass"
   type        String   @default("Search") // Search|Upload|Analysis
   status      Boolean  @default(true)
   defaultCost Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  serviceApis          ServiceApi[]
-  userServiceAccesses  UserServiceAccess[]
-  searchHistory        SearchHistory[]
+  serviceApis         ServiceApi[]
+  userServiceAccesses UserServiceAccess[]
+  searchHistory       SearchHistory[]
 }
 
 model ApiConfig {
-  id            String       @id @default(cuid())
-  name          String
-  method        ApiHttpMethod
-  baseUrl       String
-  endpoint      String
-  queryParam    String
-  description   String?
-  authType      ApiAuthType  @default(NONE)
-  apiKeyHeader  String?
-  apiKeyValue   String?
-  bearerToken   String?
-  basicUser     String?
-  basicPass     String?
+  id           String        @id @default(cuid())
+  name         String
+  method       ApiHttpMethod
+  baseUrl      String
+  endpoint     String
+  queryParam   String
+  description  String?
+  authType     ApiAuthType   @default(NONE)
+  apiKeyHeader String?
+  apiKeyValue  String?
+  bearerToken  String?
+  basicUser    String?
+  basicPass    String?
 
   // session login (scaffold fields)
-  loginUrl        String?
-  usernameField   String?
-  passwordField   String?
-  captchaEnabled  Boolean    @default(false)
-  sessionPolicy   String?    // Auto-refresh|Manual
+  loginUrl       String?
+  usernameField  String?
+  passwordField  String?
+  captchaEnabled Boolean @default(false)
+  sessionPolicy  String? // Auto-refresh|Manual
 
   // query types support
-  supportsCnic       Boolean @default(false)
-  supportsPhone      Boolean @default(false)
-  supportsEngine     Boolean @default(false)
-  supportsChassis    Boolean @default(false)
-  supportsReg        Boolean @default(false)
-  supportsLicense    Boolean @default(false)
-  customRegex        String?
+  supportsCnic    Boolean @default(false)
+  supportsPhone   Boolean @default(false)
+  supportsEngine  Boolean @default(false)
+  supportsChassis Boolean @default(false)
+  supportsReg     Boolean @default(false)
+  supportsLicense Boolean @default(false)
+  customRegex     String?
 
   // rate limits (per API)
-  maxPerMinute     Int? 
-  maxPerDay        Int?
-  cooldownSeconds  Int?
+  maxPerMinute    Int?
+  maxPerDay       Int?
+  cooldownSeconds Int?
 
   // cost + access
-  creditsPerSearch Int      @default(1)
-  allowUser        Boolean  @default(true)
-  allowReseller    Boolean  @default(true)
-  allowAdmin       Boolean  @default(true)
+  creditsPerSearch Int     @default(1)
+  allowUser        Boolean @default(true)
+  allowReseller    Boolean @default(true)
+  allowAdmin       Boolean @default(true)
 
-  status         Boolean  @default(true)
+  status Boolean @default(true)
 
   sampleQuery    String?
   sampleResponse Json?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  serviceApis    ServiceApi[]
+  serviceApis ServiceApi[]
 }
 
 model ServiceApi {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   serviceId String
   apiId     String
-  priority  Int      @default(1) // for future failover ordering
-  enabled   Boolean  @default(true)
+  priority  Int     @default(1) // for future failover ordering
+  enabled   Boolean @default(true)
 
-  service   Service  @relation(fields: [serviceId], references: [id])
-  api       ApiConfig @relation(fields: [apiId], references: [id])
+  service Service   @relation(fields: [serviceId], references: [id])
+  api     ApiConfig @relation(fields: [apiId], references: [id])
 
   @@unique([serviceId, apiId])
 }
 
 model UserServiceAccess {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   userId    String
   serviceId String
-  allowed   Boolean  @default(true)
+  allowed   Boolean @default(true)
 
-  user      User     @relation(fields: [userId], references: [id])
-  service   Service  @relation(fields: [serviceId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+  service Service @relation(fields: [serviceId], references: [id])
 
   @@unique([userId, serviceId])
 }
 
 model SearchHistory {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  serviceId  String?
-  service    Service? @relation(fields: [serviceId], references: [id])
-  query      String
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  serviceId    String?
+  service      Service? @relation(fields: [serviceId], references: [id])
+  query        String
   detectedType String
-  status     String   // success|error|blocked
-  results    Json?
-  cost       Int      @default(0)
-  ip         String
-  createdAt  DateTime @default(now())
+  status       String // success|error|blocked
+  results      Json?
+  cost         Int      @default(0)
+  ip           String
+  createdAt    DateTime @default(now())
 
   @@index([userId, createdAt])
 }
@@ -264,7 +283,7 @@ model AccessLog {
 model IPList {
   id        String   @id @default(cuid())
   ip        String   @unique
-  type      String   // BLACKLIST|WHITELIST
+  type      String // BLACKLIST|WHITELIST
   reason    String?
   createdAt DateTime @default(now())
 }
@@ -277,4 +296,66 @@ model AdminAudit {
   meta      Json?
   ip        String
   createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  key       String?
+  category  String
+  title     String
+  message   String
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  meta      Json?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId, createdAt])
+  @@index([userId, isRead, createdAt])
+}
+
+model SupportTicket {
+  id                 String              @id @default(cuid())
+  token              String              @unique
+  subject            String
+  status             SupportTicketStatus @default(OPEN)
+  category           String              @default("GENERAL")
+  priority           String              @default("NORMAL")
+  source             String              @default("dashboard")
+  userId             String?
+  user               User?               @relation("SupportTicketOwner", fields: [userId], references: [id])
+  assignedAdminId    String?
+  assignedAdmin      User?               @relation("SupportTicketAssignee", fields: [assignedAdminId], references: [id])
+  contactEmail       String?
+  contactName        String?
+  lastMessageAt      DateTime            @default(now())
+  lastMessagePreview String?
+  closedAt           DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  messages           SupportMessage[]
+
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@index([token])
+}
+
+model SupportMessage {
+  id            String               @id @default(cuid())
+  ticketId      String
+  ticket        SupportTicket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderType    SupportMessageSender
+  authorId      String?
+  author        User?                @relation("SupportMessageAuthor", fields: [authorId], references: [id])
+  body          String
+  isReadByUser  Boolean              @default(false)
+  isReadByAdmin Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+
+  @@index([ticketId, createdAt])
+  @@index([authorId, createdAt])
 }

@@ -1,33 +1,37 @@
 import React, { useEffect, useState } from "react";
 import { Box, Heading, Table, Tbody, Td, Th, Thead, Tr, Text } from "@chakra-ui/react";
+import { useTheme as useMuiTheme } from "@mui/material";
 import { api } from "../../app/api";
+import { getDashboardUi } from "../../dashboard/uiTokens";
 
 export default function UserTransactions() {
+  const muiTheme = useMuiTheme();
+  const ui = getDashboardUi(muiTheme.palette.mode);
   const [rows, setRows] = useState<any[]>([]);
   useEffect(() => {
-    api.get("/me/transactions?limit=50").then(r => setRows(r.data.rows ?? [])).catch(() => setRows([]));
+    api.get("/me/transactions?limit=50").then(r => setRows(r.data.items ?? [])).catch(() => setRows([]));
   }, []);
 
   return (
-    <Box>
+    <Box color={ui.text.primary}>
       <Heading size="lg" mb={4}>Transaction History</Heading>
-      <Box bg="rgba(255,255,255,0.06)" border="1px solid rgba(255,255,255,0.08)" borderRadius="18px" overflow="hidden">
+      <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="18px" overflow="hidden">
         <Table variant="simple" size="sm">
-          <Thead bg="rgba(255,255,255,0.05)">
+          <Thead bg={ui.surface.hover}>
             <Tr>
-              <Th color="whiteAlpha.800">Date</Th>
-              <Th color="whiteAlpha.800">Amount</Th>
-              <Th color="whiteAlpha.800">Coins</Th>
-              <Th color="whiteAlpha.800">Notes</Th>
+              <Th color={ui.text.secondary}>Date</Th>
+              <Th color={ui.text.secondary}>Amount</Th>
+              <Th color={ui.text.secondary}>Coins</Th>
+              <Th color={ui.text.secondary}>Notes</Th>
             </Tr>
           </Thead>
           <Tbody>
             {rows.map(r => (
               <Tr key={r.id}>
                 <Td>{new Date(r.createdAt).toLocaleString()}</Td>
-                <Td>{r.amount ?? "-"}</Td>
+                <Td>{r.amountPkr ?? "-"}</Td>
                 <Td>{r.coins ?? "-"}</Td>
-                <Td>{r.notes ?? "-"}</Td>
+                <Td>{r.note ?? "-"}</Td>
               </Tr>
             ))}
             {!rows.length ? (

@@ -14,23 +14,46 @@ async function upsertUser(email: string, name: string, password: string, role: U
 }
 
 async function main() {
-  // Services
-  const elookupService = await prisma.service.upsert({
-    where: { name: "Elookup Search" },
-    update: { description: "Unified multi-database search", icon: "fa-magnifying-glass", type: "Search", status: true, defaultCost: 1 },
-    create: { name: "Elookup Search", description: "Unified multi-database search", icon: "fa-magnifying-glass", type: "Search", status: true, defaultCost: 1 },
-  });
-
-  await prisma.service.upsert({
-    where: { name: "Mix Family Tree" },
-    update: { description: "Graph family tree search", icon: "fa-sitemap", type: "FamilyTree", status: true, defaultCost: 1 },
-    create: { name: "Mix Family Tree", description: "Graph family tree search", icon: "fa-sitemap", type: "FamilyTree", status: true, defaultCost: 1 },
-  });
-
-  // APIs (3 sample)
+  // APIs
   const simApi = await prisma.apiConfig.upsert({
     where: { id: "seed-sim" },
-    update: {},
+    update: {
+      name: "SIM Database",
+      method: "GET",
+      baseUrl: "https://elookup.xyz/sim/",
+      endpoint: "simrecord.php",
+      queryParam: "num",
+      description: "SIM info (CNIC/Phone)",
+      authType: "NONE",
+      supportsCnic: true,
+      supportsPhone: true,
+      creditsPerSearch: 1,
+      allowUser: true,
+      allowReseller: true,
+      allowAdmin: true,
+      status: true,
+      sampleQuery: "4220186578817",
+      sampleResponse: {
+        status: "success",
+        detected_type: "cnic",
+        query_sent: "4220186578817",
+        result_count: 2,
+        results: [
+          {
+            mobile: "923111771386",
+            name: "SYED ZEESHAN KAZMI",
+            cnic: "4220186578817",
+            address: "RAWALPINDI",
+          },
+          {
+            mobile: "923455943116",
+            name: "SYED ZEESHAN KAZMI",
+            cnic: "4220186578817",
+            address: "LAHORE",
+          },
+        ],
+      },
+    },
     create: {
       id: "seed-sim",
       name: "SIM Database",
@@ -50,7 +73,21 @@ async function main() {
         status: "success",
         detected_type: "cnic",
         query_sent: "4220186578817",
-        result_count: 1
+        result_count: 2,
+        results: [
+          {
+            mobile: "923111771386",
+            name: "SYED ZEESHAN KAZMI",
+            cnic: "4220186578817",
+            address: "RAWALPINDI",
+          },
+          {
+            mobile: "923455943116",
+            name: "SYED ZEESHAN KAZMI",
+            cnic: "4220186578817",
+            address: "LAHORE",
+          },
+        ],
       }
     }
   });
@@ -99,13 +136,235 @@ async function main() {
     }
   });
 
-  // Assign to unified service
-  for (const api of [simApi, exciseApi, ajkApi]) {
-    await prisma.serviceApi.upsert({
-      where: { serviceId_apiId: { serviceId: elookupService.id, apiId: api.id } },
-      update: { enabled: true, priority: 1 },
-      create: { serviceId: elookupService.id, apiId: api.id, enabled: true, priority: 1 },
+  const islamabadApi = await prisma.apiConfig.upsert({
+    where: { id: "seed-islamabad-excise" },
+    update: {},
+    create: {
+      id: "seed-islamabad-excise",
+      name: "Islamabad Excise",
+      method: "GET",
+      baseUrl: "https://cnic.sims.govpk.site/elookup/ict/",
+      endpoint: "search.php",
+      queryParam: "query",
+      description: "Islamabad vehicle record (CNIC/Reg/Chassis/Engine)",
+      authType: "NONE",
+      supportsCnic: true,
+      supportsEngine: true,
+      supportsChassis: true,
+      supportsReg: true,
+      creditsPerSearch: 1,
+      allowUser: true, allowReseller: true, allowAdmin: true,
+      status: true,
+      sampleQuery: "3740537438711"
+    }
+  });
+
+  const familyTreeApi = await prisma.apiConfig.upsert({
+    where: { id: "seed-family-tree" },
+    update: {},
+    create: {
+      id: "seed-family-tree",
+      name: "Family Tree API",
+      method: "GET",
+      baseUrl: "https://placeholder.elookup.local/family-tree/",
+      endpoint: "search",
+      queryParam: "cnic",
+      description: "Dummy family tree API. Update endpoint/auth from admin before production use.",
+      authType: "NONE",
+      supportsCnic: true,
+      creditsPerSearch: 1,
+      allowUser: true, allowReseller: true, allowAdmin: true,
+      status: false,
+      sampleQuery: "4220186578817"
+    }
+  });
+
+  const cmsPunjabPoliceApi = await prisma.apiConfig.upsert({
+    where: { id: "seed-cms-punjab-police" },
+    update: {
+      name: "CMS Punjab Police",
+      method: "GET",
+      baseUrl: "https://igp-8787-center.psca.gop.pk/comp_form/",
+      endpoint: "get_api_detail",
+      queryParam: "cnic",
+      description: "Punjab Police complaint records by CNIC or mobile number.",
+      authType: "NONE",
+      supportsCnic: true,
+      supportsPhone: true,
+      creditsPerSearch: 1,
+      allowUser: true,
+      allowReseller: true,
+      allowAdmin: true,
+      status: true,
+      sampleQuery: "6110118359225",
+      sampleResponse: {
+        status: "success",
+        source_format: "html_table",
+        result_count: 1,
+        results: [
+          {
+            complaint_no: "WK-3/28/2022-3266",
+            cnic: "6110118359225",
+            complainant_name: "سید ذیشان کاظمی",
+            mobile: "03111773434",
+            district: "Rawalpindi",
+            police_station: "Waris Khan",
+            category: "CNIC Loss",
+            officer_name: "طاہر محمود محرر",
+            officer_mobile: "03331909211",
+            status: "Completed",
+            date: "28-03-2022 10:22:41",
+          },
+        ],
+      },
+    },
+    create: {
+      id: "seed-cms-punjab-police",
+      name: "CMS Punjab Police",
+      method: "GET",
+      baseUrl: "https://igp-8787-center.psca.gop.pk/comp_form/",
+      endpoint: "get_api_detail",
+      queryParam: "cnic",
+      description: "Punjab Police complaint records by CNIC or mobile number.",
+      authType: "NONE",
+      supportsCnic: true,
+      supportsPhone: true,
+      creditsPerSearch: 1,
+      allowUser: true,
+      allowReseller: true,
+      allowAdmin: true,
+      status: true,
+      sampleQuery: "6110118359225",
+      sampleResponse: {
+        status: "success",
+        source_format: "html_table",
+        result_count: 1,
+        results: [
+          {
+            complaint_no: "WK-3/28/2022-3266",
+            cnic: "6110118359225",
+            complainant_name: "سید ذیشان کاظمی",
+            mobile: "03111773434",
+            district: "Rawalpindi",
+            police_station: "Waris Khan",
+            category: "CNIC Loss",
+            officer_name: "طاہر محمود محرر",
+            officer_mobile: "03331909211",
+            status: "Completed",
+            date: "28-03-2022 10:22:41",
+          },
+        ],
+      },
+    },
+  });
+
+  const services = [
+    {
+      name: "Elookup Search",
+      description: "Unified multi-database search across configured sources.",
+      icon: "fa-magnifying-glass",
+      type: "Search",
+      apiLinks: [simApi.id, cmsPunjabPoliceApi.id, exciseApi.id, ajkApi.id],
+    },
+    {
+      name: "CNIC Lookup",
+      description: "Unified CNIC search using multiple APIs from one click.",
+      icon: "fa-id-card",
+      type: "UnifiedSearch",
+      apiLinks: [simApi.id, cmsPunjabPoliceApi.id, exciseApi.id, ajkApi.id],
+    },
+    {
+      name: "Mobile Lookup",
+      description: "Unified mobile number search using all phone-supported APIs.",
+      icon: "fa-mobile-screen-button",
+      type: "UnifiedSearch",
+      apiLinks: [simApi.id, cmsPunjabPoliceApi.id],
+    },
+    {
+      name: "Mix Family Tree",
+      description: "Family tree graph search service. Dummy API linked for admin configuration.",
+      icon: "fa-sitemap",
+      type: "FamilyTree",
+      apiLinks: [familyTreeApi.id],
+    },
+    {
+      name: "Punjab Excise",
+      description: "Punjab vehicle lookup service with editable excise API mapping.",
+      icon: "fa-car",
+      type: "Vehicle",
+      apiLinks: [exciseApi.id],
+    },
+    {
+      name: "Islamabad Excise",
+      description: "Islamabad vehicle lookup service with editable excise API mapping.",
+      icon: "fa-car",
+      type: "Vehicle",
+      apiLinks: [islamabadApi.id],
+    },
+    {
+      name: "Sindh Excise",
+      description: "Sindh vehicle lookup service with editable excise API mapping.",
+      icon: "fa-car",
+      type: "Vehicle",
+      apiLinks: [exciseApi.id],
+    },
+    {
+      name: "Balochistan Excise",
+      description: "Balochistan vehicle lookup service with editable excise API mapping.",
+      icon: "fa-car",
+      type: "Vehicle",
+      apiLinks: [exciseApi.id],
+    },
+    {
+      name: "KPK Excise",
+      description: "KPK vehicle lookup service with editable excise API mapping.",
+      icon: "fa-car",
+      type: "Vehicle",
+      apiLinks: [exciseApi.id],
+    },
+    {
+      name: "Kashmir Excise",
+      description: "Kashmir/AJK vehicle lookup service with editable excise API mapping.",
+      icon: "fa-car",
+      type: "Vehicle",
+      apiLinks: [ajkApi.id],
+    },
+    {
+      name: "Stolen Vehicle Record",
+      description: "Specific stolen vehicle verification service with editable API mapping.",
+      icon: "fa-car-burst",
+      type: "Vehicle",
+      apiLinks: [exciseApi.id],
+    },
+  ];
+
+  for (const serviceDef of services) {
+    const service = await prisma.service.upsert({
+      where: { name: serviceDef.name },
+      update: {
+        description: serviceDef.description,
+        icon: serviceDef.icon,
+        type: serviceDef.type,
+        status: true,
+        defaultCost: 1,
+      },
+      create: {
+        name: serviceDef.name,
+        description: serviceDef.description,
+        icon: serviceDef.icon,
+        type: serviceDef.type,
+        status: true,
+        defaultCost: 1,
+      },
     });
+
+    for (const [index, apiId] of serviceDef.apiLinks.entries()) {
+      await prisma.serviceApi.upsert({
+        where: { serviceId_apiId: { serviceId: service.id, apiId } },
+        update: { enabled: true, priority: index + 1 },
+        create: { serviceId: service.id, apiId, enabled: true, priority: index + 1 },
+      });
+    }
   }
 
   // Users

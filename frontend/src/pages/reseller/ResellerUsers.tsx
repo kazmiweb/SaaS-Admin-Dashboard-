@@ -25,7 +25,9 @@ import {
   useDisclosure,
   useToast,
 } from "@chakra-ui/react";
+import { useTheme as useMuiTheme } from "@mui/material";
 import { api } from "../../app/api";
+import { getDashboardUi } from "../../dashboard/uiTokens";
 
 type UserRow = {
   id: string;
@@ -39,6 +41,8 @@ type UserRow = {
 };
 
 export default function ResellerUsers() {
+  const muiTheme = useMuiTheme();
+  const ui = getDashboardUi(muiTheme.palette.mode);
   const toast = useToast();
   const [rows, setRows] = React.useState<UserRow[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -137,7 +141,7 @@ export default function ResellerUsers() {
   }
 
   return (
-    <Box>
+    <Box color={ui.text.primary}>
       <HStack justify="space-between" flexWrap="wrap" gap={3} mb={5}>
         <Box>
           <Heading size="lg">User Management</Heading>
@@ -153,21 +157,21 @@ export default function ResellerUsers() {
         </HStack>
       </HStack>
 
-      <Box bg="rgba(255,255,255,0.06)" border="1px solid rgba(255,255,255,0.08)" borderRadius="18px" overflow="hidden">
+      <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="18px" overflow="hidden">
         <Table size="sm">
           <Thead>
             <Tr>
-              <Th color="whiteAlpha.700">Name</Th>
-              <Th color="whiteAlpha.700">Email</Th>
-              <Th color="whiteAlpha.700">Coins</Th>
-              <Th color="whiteAlpha.700">Expiry</Th>
-              <Th color="whiteAlpha.700">Status</Th>
-              <Th color="whiteAlpha.700" textAlign="right">Actions</Th>
+              <Th color={ui.text.secondary}>Name</Th>
+              <Th color={ui.text.secondary}>Email</Th>
+              <Th color={ui.text.secondary}>Coins</Th>
+              <Th color={ui.text.secondary}>Expiry</Th>
+              <Th color={ui.text.secondary}>Status</Th>
+              <Th color={ui.text.secondary} textAlign="right">Actions</Th>
             </Tr>
           </Thead>
           <Tbody>
             {rows.map((u) => (
-              <Tr key={u.id} _hover={{ bg: "rgba(255,255,255,0.04)" }}>
+              <Tr key={u.id} _hover={{ bg: ui.surface.hover }}>
                 <Td>{u.name}</Td>
                 <Td>{u.email}</Td>
                 <Td>
@@ -203,7 +207,7 @@ export default function ResellerUsers() {
 
       <Modal isOpen={isOpen} onClose={onClose} isCentered size="lg">
         <ModalOverlay />
-        <ModalContent bg="navy.900" border="1px solid rgba(255,255,255,0.12)" borderRadius="18px">
+        <ModalContent bg={ui.surface.overlay} border={`1px solid ${ui.surface.borderStrong}`} borderRadius="18px">
           <ModalHeader>Create User</ModalHeader>
           <ModalBody>
             <Stack spacing={4}>
@@ -219,7 +223,7 @@ export default function ResellerUsers() {
                 <FormLabel>Password</FormLabel>
                 <Input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Min 8 chars" />
               </FormControl>
-              <Divider borderColor="whiteAlpha.200" />
+              <Divider borderColor={ui.surface.borderStrong} />
               <FormControl>
                 <FormLabel>Initial Coins</FormLabel>
                 <Input value={coins} onChange={(e) => setCoins(e.target.value)} type="number" min={0} />

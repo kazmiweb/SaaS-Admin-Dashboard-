@@ -12,7 +12,10 @@ import {
   TagLabel,
   Skeleton,
 } from "@chakra-ui/react";
+import { useTheme as useMuiTheme } from "@mui/material";
 import { api } from "../../app/api";
+import { issueSearchToken } from "../../app/searchToken";
+import { getDashboardUi } from "../../dashboard/uiTokens";
 import ResultsView from "./components/ResultsView";
 
 type UnifiedResult = { apiId: string; apiName: string; ok: boolean; data?: any; error?: string };
@@ -22,12 +25,32 @@ export default function IntelligenceBase({
   placeholder,
   validate,
   normalizeForBackend,
+  description = "Enter exact details to retrieve official records.",
+  badgeLabel = "Secure Intelligence Search",
+  searchLabel = "Search Record",
+  clearLabel = "Clear Record",
+  resultsActions = "none",
+  extraFields,
+  buildRequestParams,
+  showHeader = true,
+  serviceName,
 }: {
   title: string;
   placeholder: string;
   validate: (raw: string) => string | null; // return error msg or null
   normalizeForBackend?: (raw: string) => string;
+  description?: string;
+  badgeLabel?: string | null;
+  searchLabel?: string;
+  clearLabel?: string;
+  resultsActions?: "default" | "single-pdf" | "none";
+  extraFields?: React.ReactNode;
+  buildRequestParams?: (normalizedQuery: string) => Record<string, unknown>;
+  showHeader?: boolean;
+  serviceName?: string;
 }) {
+  const muiTheme = useMuiTheme();
+  const ui = getDashboardUi(muiTheme.palette.mode);
   const toast = useToast();
   const [value, setValue] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -47,7 +70,15 @@ export default function IntelligenceBase({
     setBlocked(null);
     setResults([]);
     try {
-      const res = await api.get("/search/unified", { params: { query: q } });
+      const searchToken = await issueSearchToken();
+      const res = await api.get("/search/unified", {
+        params: {
+          query: q,
+          ...(serviceName ? { serviceName } : {}),
+          ...(buildRequestParams ? buildRequestParams(q) : {}),
+        },
+        headers: { "x-search-token": searchToken },
+      });
       setDetectedType(res.data.detectedType ?? "");
       setQuerySent(res.data.querySent ?? q);
       setResults(res.data.results ?? []);
@@ -76,20 +107,26 @@ export default function IntelligenceBase({
   }
 
   return (
-    <Box>
-      <HStack justify="space-between" flexWrap="wrap" gap={3} mb={6}>
-        <Box>
-          <Heading size="lg">{title}</Heading>
-          <Text opacity={0.8} mt={1}>
-            Enter exact details to retrieve official records.
-          </Text>
-        </Box>
-        <Tag colorScheme="blue" borderRadius="999px" px={4} py={2}>
-          <TagLabel>Secure Intelligence Search</TagLabel>
-        </Tag>
-      </HStack>
+    <Box color={ui.text.primary}>
+      {showHeader ? (
+        <HStack justify="space-between" flexWrap="wrap" gap={3} mb={6}>
+          <Box>
+            <Heading size="lg">{title}</Heading>
+            {description ? (
+              <Text opacity={0.8} mt={1}>
+                {description}
+              </Text>
+            ) : null}
+          </Box>
+          {badgeLabel ? (
+            <Tag colorScheme="blue" borderRadius="999px" px={4} py={2}>
+              <TagLabel>{badgeLabel}</TagLabel>
+            </Tag>
+          ) : null}
+        </HStack>
+      ) : null}
 
-      <Box bg="rgba(255,255,255,0.06)" border="1px solid rgba(255,255,255,0.08)" borderRadius="22px" p={{ base: 4, md: 6 }}>
+      <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="22px" p={{ base: 4, md: 6 }}>
         <Stack spacing={4}>
           <Input
             value={value}
@@ -97,22 +134,30 @@ export default function IntelligenceBase({
             placeholder={placeholder}
             size="lg"
             borderRadius="16px"
-            bg="rgba(0,0,0,0.25)"
-            border="1px solid rgba(255,255,255,0.12)"
-            _placeholder={{ color: "whiteAlpha.600" }}
+            bg={ui.surface.input}
+            border={`1px solid ${ui.surface.inputBorder}`}
+            color={ui.text.primary}
+            _placeholder={{ color: ui.text.muted }}
           />
+
+          {extraFields}
 
           <HStack flexWrap="wrap" gap={3}>
             <Button colorScheme="blue" borderRadius="999px" size="lg" onClick={run} isLoading={loading}>
-              🔍 Search Record
+              {searchLabel}
             </Button>
             <Button variant="outline" borderRadius="999px" size="lg" onClick={() => setValue("")}>
-              Clear
+              {clearLabel}
             </Button>
+            {resultsActions === "single-pdf" && results.length ? (
+              <Button colorScheme="green" borderRadius="999px" size="lg" onClick={exportPdf}>
+                Download PDF
+              </Button>
+            ) : null}
           </HStack>
 
           {blocked ? (
-            <Box bg="rgba(255,215,0,0.12)" border="1px solid rgba(255,215,0,0.25)" borderRadius="16px" p={4}>
+            <Box bg={ui.status.warningBg} border={`1px solid ${ui.status.warningBorder}`} borderRadius="16px" p={4}>
               <Text fontWeight="700">⚠️ You have zero credit. Please contact admin</Text>
               <Text mt={1} opacity={0.9}>{blocked}</Text>
             </Box>
@@ -126,7 +171,14 @@ export default function IntelligenceBase({
             </Stack>
           ) : null}
 
-          {!loading && results.length ? <ResultsView query={querySent || value} results={results} onExportPdf={exportPdf} /> : null}
+          {!loading && results.length ? (
+            <ResultsView
+              query={querySent || value}
+              results={results}
+              onExportPdf={exportPdf}
+              actionsVariant={resultsActions}
+            />
+          ) : null}
         </Stack>
       </Box>
     </Box>

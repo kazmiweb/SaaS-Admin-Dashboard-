@@ -32,6 +32,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await api.get("/me");
       setUser(res.data.me);
+      if (typeof window !== "undefined" && (res.data.me?.theme === "light" || res.data.me?.theme === "dark")) {
+        window.localStorage.setItem("dashboardMode", res.data.me.theme);
+        window.dispatchEvent(new CustomEvent("dashboard-theme-change", { detail: res.data.me.theme }));
+      }
     } catch (e) {
       setUser(null);
     } finally {

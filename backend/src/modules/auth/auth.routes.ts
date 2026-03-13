@@ -7,10 +7,13 @@ import { sendOtpEmail } from "../../shared/mail/mailer.js";
 import { signAccessToken, signRefreshToken, signSignupToken, verifyRefresh, verifySignup } from "../../shared/security/jwt.js";
 import { syncExpiredCredits } from "../../shared/security/expiry.js";
 import { createSession, destroySession } from "../../shared/security/session.js";
+import { noteAuthFailure, noteAuthSuccess } from "../security/security.service.js";
 
 export const authRouter = Router();
 
 const emailSchema = z.string().email().max(255);
+const OTP_EXPIRY_MS = 10 * 60 * 1000;
+const OTP_COOLDOWN_SECONDS = Math.max(20, Number(process.env.OTP_REQUEST_COOLDOWN_SECONDS ?? 45));
 
 function genOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -28,16 +31,38 @@ authRouter.post("/request-otp", async (req: Request, res: Response) => {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw new HttpError(409, "EMAIL_EXISTS", "Email already registered.");
 
-  const otp = genOtp();
-  const codeHash = await hashOtp(otp);
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const latestPending = await prisma.oTPVerification.findFirst({
+    where: { email, purpose: "SIGNUP", usedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (latestPending) {
+    const cooldownUntil = latestPending.createdAt.getTime() + OTP_COOLDOWN_SECONDS * 1000;
+    const remainingMs = cooldownUntil - Date.now();
+    if (remainingMs > 0) {
+      const waitSeconds = Math.ceil(remainingMs / 1000);
+      throw new HttpError(429, "OTP_COOLDOWN", `Please wait ${waitSeconds}s before requesting another OTP.`);
+    }
+  }
 
-  await prisma.oTPVerification.create({
-    data: { email, codeHash, purpose: "SIGNUP", expiresAt }
+  await prisma.oTPVerification.updateMany({
+    where: { email, purpose: "SIGNUP", usedAt: null },
+    data: { usedAt: new Date() },
   });
 
-  // Send email
-  await sendOtpEmail(email, otp);
+  const otp = genOtp();
+  const codeHash = await hashOtp(otp);
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
+
+  const created = await prisma.oTPVerification.create({
+    data: { email, codeHash, purpose: "SIGNUP", expiresAt },
+  });
+
+  try {
+    await sendOtpEmail(email, otp);
+  } catch {
+    await prisma.oTPVerification.delete({ where: { id: created.id } }).catch(() => void 0);
+    throw new HttpError(503, "OTP_DELIVERY_FAILED", "OTP delivery failed. Please try again shortly.");
+  }
 
   res.json({ status: "success", message: "OTP sent" });
 });
@@ -45,19 +70,30 @@ authRouter.post("/request-otp", async (req: Request, res: Response) => {
 authRouter.post("/verify-otp", async (req: Request, res: Response) => {
   const body = z.object({ email: emailSchema, otp: z.string().regex(/^\d{6}$/) }).parse(req.body);
   const email = body.email.toLowerCase();
+  const ip = (req as any).clientIp ?? "unknown";
 
   const record = await prisma.oTPVerification.findFirst({
     where: { email, purpose: "SIGNUP", usedAt: null },
     orderBy: { createdAt: "desc" }
   });
 
-  if (!record) throw new HttpError(400, "OTP_INVALID", "OTP not found.");
-  if (record.expiresAt.getTime() < Date.now()) throw new HttpError(400, "OTP_EXPIRED", "OTP expired.");
+  if (!record) {
+    await noteAuthFailure({ email, ip, reason: "OTP_INVALID" });
+    throw new HttpError(400, "OTP_INVALID", "OTP not found.");
+  }
+  if (record.expiresAt.getTime() < Date.now()) {
+    await noteAuthFailure({ email, ip, reason: "OTP_EXPIRED" });
+    throw new HttpError(400, "OTP_EXPIRED", "OTP expired.");
+  }
 
   const ok = await bcrypt.compare(body.otp, record.codeHash);
-  if (!ok) throw new HttpError(400, "OTP_INVALID", "Invalid OTP.");
+  if (!ok) {
+    await noteAuthFailure({ email, ip, reason: "OTP_INVALID" });
+    throw new HttpError(400, "OTP_INVALID", "Invalid OTP.");
+  }
 
   await prisma.oTPVerification.update({ where: { id: record.id }, data: { usedAt: new Date() } });
+  await noteAuthSuccess({ email, ip, reason: "OTP_VERIFIED" });
 
   const signupToken = signSignupToken(email);
   res.json({ status: "success", signupToken });
@@ -128,44 +164,45 @@ authRouter.post("/login", async (req: Request, res: Response) => {
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (!user) {
-    await prisma.accessLog.create({ data: { email, ip, success: false, reason: "EMAIL_NOT_FOUND" } });
+    await noteAuthFailure({ email, ip, reason: "EMAIL_NOT_FOUND" });
     throw new HttpError(401, "INVALID_CREDENTIALS", "Invalid credentials");
   }
 
   if (user.status === "BLACKLISTED") {
-    await prisma.accessLog.create({ data: { userId: user.id, email, ip, success: false, reason: "BLACKLISTED" } });
+    await noteAuthFailure({ userId: user.id, email, ip, reason: "BLACKLISTED" });
     throw new HttpError(403, "BLACKLISTED", "Account is blacklisted.");
   }
 
   if (user.status !== "ACTIVE") {
-    await prisma.accessLog.create({ data: { userId: user.id, email, ip, success: false, reason: "NOT_ACTIVE" } });
+    await noteAuthFailure({ userId: user.id, email, ip, reason: "NOT_ACTIVE" });
     throw new HttpError(403, "SUSPENDED", "Account is not active.");
   }
 
   if (user.expireAt && user.expireAt.getTime() < Date.now()) {
     await syncExpiredCredits(user);
-    await prisma.accessLog.create({ data: { userId: user.id, email, ip, success: false, reason: "EXPIRED" } });
+    await noteAuthFailure({ userId: user.id, email, ip, reason: "EXPIRED" });
     throw new HttpError(403, "EXPIRED", "Account expired. Contact admin.");
   }
 
   const ok = await bcrypt.compare(body.password, user.passwordHash);
   if (!ok) {
-    await prisma.accessLog.create({ data: { userId: user.id, email, ip, success: false, reason: "BAD_PASSWORD" } });
+    await noteAuthFailure({ userId: user.id, email, ip, reason: "BAD_PASSWORD" });
     throw new HttpError(401, "INVALID_CREDENTIALS", "Invalid credentials");
   }
-
-  await prisma.accessLog.create({ data: { userId: user.id, email, ip, success: true } });
 
   // Single-device enforcement for USER/RESELLER
   if (user.role === "USER" || user.role === "RESELLER") {
     if (!body.deviceId) throw new HttpError(400, "DEVICE_ID_REQUIRED", "Missing device id");
     if (user.deviceId && user.deviceId !== body.deviceId) {
+      await noteAuthFailure({ userId: user.id, email, ip, reason: "DEVICE_MISMATCH" });
       throw new HttpError(403, "DEVICE_MISMATCH", "This account is already logged in on another device. Reset device to continue.");
     }
     if (!user.deviceId) {
       await prisma.user.update({ where: { id: user.id }, data: { deviceId: body.deviceId, deviceBoundAt: new Date() } });
     }
   }
+
+  await noteAuthSuccess({ userId: user.id, email, ip, reason: "LOGIN_SUCCESS" });
 
   const accessToken = signAccessToken(user.id, user.role);
   const refreshToken = signRefreshToken(user.id, user.role);
@@ -187,17 +224,44 @@ authRouter.post("/login", async (req: Request, res: Response) => {
 authRouter.post("/device-reset/request", async (req: Request, res: Response) => {
   const body = z.object({ email: emailSchema }).parse(req.body);
   const email = body.email.toLowerCase();
+  const ip = (req as any).clientIp ?? "unknown";
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
     // don't leak user existence
+    await noteAuthFailure({ email, ip, reason: "DEVICE_RESET_REQUEST_UNKNOWN_EMAIL" });
     return res.json({ status: "success", message: "If the account exists, an OTP was sent." });
   }
 
+  const latestPending = await prisma.oTPVerification.findFirst({
+    where: { email, purpose: "DEVICE_RESET", usedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (latestPending) {
+    const cooldownUntil = latestPending.createdAt.getTime() + OTP_COOLDOWN_SECONDS * 1000;
+    const remainingMs = cooldownUntil - Date.now();
+    if (remainingMs > 0) {
+      const waitSeconds = Math.ceil(remainingMs / 1000);
+      throw new HttpError(429, "OTP_COOLDOWN", `Please wait ${waitSeconds}s before requesting another OTP.`);
+    }
+  }
+
+  await prisma.oTPVerification.updateMany({
+    where: { email, purpose: "DEVICE_RESET", usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
   const otp = genOtp();
   const codeHash = await hashOtp(otp);
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  await prisma.oTPVerification.create({ data: { email, codeHash, purpose: "DEVICE_RESET", expiresAt } });
-  await sendOtpEmail(email, otp);
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
+  const created = await prisma.oTPVerification.create({ data: { email, codeHash, purpose: "DEVICE_RESET", expiresAt } });
+  await noteAuthSuccess({ userId: user.id, email, ip, reason: "DEVICE_RESET_REQUESTED" });
+
+  try {
+    await sendOtpEmail(email, otp);
+  } catch {
+    await prisma.oTPVerification.delete({ where: { id: created.id } }).catch(() => void 0);
+    throw new HttpError(503, "OTP_DELIVERY_FAILED", "OTP delivery failed. Please try again shortly.");
+  }
   res.json({ status: "success", message: "OTP sent" });
 });
 
@@ -211,20 +275,31 @@ authRouter.post("/device-reset/verify", async (req: Request, res: Response) => {
     .parse(req.body);
 
   const email = body.email.toLowerCase();
+  const ip = (req as any).clientIp ?? "unknown";
   const record = await prisma.oTPVerification.findFirst({
     where: { email, purpose: "DEVICE_RESET", usedAt: null },
     orderBy: { createdAt: "desc" },
   });
-  if (!record) throw new HttpError(400, "OTP_INVALID", "OTP not found.");
-  if (record.expiresAt.getTime() < Date.now()) throw new HttpError(400, "OTP_EXPIRED", "OTP expired.");
+  if (!record) {
+    await noteAuthFailure({ email, ip, reason: "OTP_INVALID" });
+    throw new HttpError(400, "OTP_INVALID", "OTP not found.");
+  }
+  if (record.expiresAt.getTime() < Date.now()) {
+    await noteAuthFailure({ email, ip, reason: "OTP_EXPIRED" });
+    throw new HttpError(400, "OTP_EXPIRED", "OTP expired.");
+  }
   const ok = await bcrypt.compare(body.otp, record.codeHash);
-  if (!ok) throw new HttpError(400, "OTP_INVALID", "Invalid OTP.");
+  if (!ok) {
+    await noteAuthFailure({ email, ip, reason: "OTP_INVALID" });
+    throw new HttpError(400, "OTP_INVALID", "Invalid OTP.");
+  }
   await prisma.oTPVerification.update({ where: { id: record.id }, data: { usedAt: new Date() } });
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
 
   await prisma.user.update({ where: { id: user.id }, data: { deviceId: body.newDeviceId, deviceBoundAt: new Date() } });
+  await noteAuthSuccess({ userId: user.id, email, ip, reason: "DEVICE_RESET_VERIFIED" });
   res.json({ status: "success" });
 });
 

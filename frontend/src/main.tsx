@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import { ChakraProvider, ColorModeScript } from "@chakra-ui/react";
 import App from "./app/App";
 import { AuthProvider } from "./app/auth/useAuth";
+import ErrorBoundary from "./app/ErrorBoundary";
+import { DashboardThemeProvider } from "./dashboard/theme";
 import theme from "./vision/theme/themeAdmin";
 
 // Vision UI fonts
@@ -16,9 +18,13 @@ import "@fontsource/roboto/500.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ChakraProvider theme={theme}>
-      <ColorModeScript initialColorMode={theme.config.initialColorMode} />
-      <AuthProvider><App /></AuthProvider>
-    </ChakraProvider>
+    <DashboardThemeProvider>
+      <ChakraProvider theme={theme}>
+        <ColorModeScript initialColorMode={theme.config.initialColorMode} />
+        <ErrorBoundary>
+          <AuthProvider><App /></AuthProvider>
+        </ErrorBoundary>
+      </ChakraProvider>
+    </DashboardThemeProvider>
   </React.StrictMode>
 );

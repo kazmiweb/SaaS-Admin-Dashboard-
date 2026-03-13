@@ -13,6 +13,8 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import dagre from "dagre";
 import { Badge, Box, HStack, Text } from "@chakra-ui/react";
+import { useTheme as useMuiTheme } from "@mui/material";
+import { getDashboardUi } from "../../../dashboard/uiTokens";
 
 type RawAny = any;
 
@@ -153,6 +155,8 @@ function buildGraph(input: any) {
 }
 
 function FamilyTreeGraphInner({ payload }: { payload: any }) {
+  const muiTheme = useMuiTheme();
+  const ui = getDashboardUi(muiTheme.palette.mode);
   const built = React.useMemo(() => buildGraph(payload), [payload]);
   const [nodes, setNodes, onNodesChange] = useNodesState(built.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(built.edges);
@@ -160,11 +164,22 @@ function FamilyTreeGraphInner({ payload }: { payload: any }) {
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
-    setNodes(built.nodes);
+    setNodes(
+      built.nodes.map((node) => ({
+        ...node,
+        style: {
+          ...node.style,
+          border: `1px solid ${ui.surface.borderStrong}`,
+          background: ui.surface.card,
+          color: ui.text.primary,
+          boxShadow: muiTheme.palette.mode === "dark" ? "0 12px 28px rgba(0,0,0,0.22)" : "0 12px 28px rgba(15,23,42,0.08)",
+        },
+      })),
+    );
     setEdges(built.edges);
     setCollapsed(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload]);
+  }, [payload, ui.surface.borderStrong, ui.surface.card, ui.text.primary, muiTheme.palette.mode]);
 
   const adjacency = React.useMemo(() => {
     const map = new Map<string, string[]>();
@@ -211,13 +226,13 @@ function FamilyTreeGraphInner({ payload }: { payload: any }) {
     return (
       <Box py={12} textAlign="center">
         <Text fontWeight="800" fontSize="lg">No family tree data found</Text>
-        <Text opacity={0.75} mt={2}>Configure a Family Tree API under Admin → API Management → assign to “Mix Family Tree”.</Text>
+        <Text opacity={0.75} mt={2}>Configure a Family Tree API under Admin and assign it to Mix Family Tree.</Text>
       </Box>
     );
   }
 
   return (
-    <Box h={{ base: "70vh", md: "72vh" }} borderRadius="2xl" overflow="hidden" border="1px solid rgba(255,255,255,0.10)">
+    <Box h={{ base: "70vh", md: "72vh" }} borderRadius="2xl" overflow="hidden" border={`1px solid ${ui.surface.borderStrong}`}>
       <ReactFlow
         nodes={displayNodes}
         edges={displayEdges}

@@ -1,108 +1,123 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/useAuth";
-import Login from "../pages/Login";
-import Signup from "../pages/Signup";
-import AdminLayout from "../components/layouts/AdminLayout";
-import UserLayout from "../components/layouts/UserLayout";
-import ResellerLayout from "../components/layouts/ResellerLayout";
+import ProtectedRoute from "./routes/ProtectedRoute";
+import RoleRedirect from "./routes/RoleRedirect";
 
-import AdminDashboard from "../pages/admin/AdminStats";
-import AdminApis from "../pages/admin/AdminApis";
-import AdminUsers from "../pages/admin/AdminUsers";
-import AdminTransactions from "../pages/admin/AdminTransactions";
-import AdminSecurity from "../pages/admin/AdminSecurity";
-import AdminActivity from "../pages/admin/AdminActivity";
-
-import UserDashboard from "../pages/user/UserHome";
-import IntelligenceCnic from "../pages/user/IntelligenceCnic";
-import IntelligenceMobile from "../pages/user/IntelligenceMobile";
-import VehiclePage from "../pages/user/VehiclePage";
-import FamilyTree from "../pages/user/FamilyTree";
-import UserProfile from "../pages/user/UserProfile";
-import UserSearches from "../pages/user/UserSearches";
-import UserTransactions from "../pages/user/UserTransactions";
-import ChangePassword from "../pages/user/ChangePassword";
-import ResellerUsers from "../pages/reseller/ResellerUsers";
-
-function RoleGate({ roles, children }: { roles: Array<"ADMIN" | "USER" | "RESELLER">; children: React.ReactNode }) {
-  const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
-  if (!roles.includes(user.role)) {
-    return <Navigate to={user.role === "ADMIN" ? "/admin/dashboard" : user.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard"} replace />;
-  }
-  return <>{children}</>;
+function lazyRetry<T extends React.ComponentType<any>>(importer: () => Promise<{ default: T }>) {
+  return lazy(importer);
 }
+
+const Login = lazyRetry(() => import("../pages/Login"));
+const Signup = lazyRetry(() => import("../pages/Signup"));
+const DashboardLayout = lazyRetry(() => import("../dashboard/layouts/DashboardLayout"));
+const AdminOverview = lazyRetry(() => import("../dashboard/pages/AdminOverview"));
+const UserOverview = lazyRetry(() => import("../dashboard/pages/UserOverview"));
+const ResellerOverview = lazyRetry(() => import("../dashboard/pages/ResellerOverview"));
+const AdminApis = lazyRetry(() => import("../pages/admin/AdminApis"));
+const AdminUsers = lazyRetry(() => import("../pages/admin/AdminUsers"));
+const AdminTransactions = lazyRetry(() => import("../pages/admin/AdminTransactions"));
+const AdminSecurity = lazyRetry(() => import("../pages/admin/AdminSecurity"));
+const AdminActivity = lazyRetry(() => import("../pages/admin/AdminActivity"));
+
+const IntelligenceCnic = lazyRetry(() => import("../pages/user/IntelligenceCnic"));
+const IntelligenceMobile = lazyRetry(() => import("../pages/user/IntelligenceMobile"));
+const VehiclePage = lazyRetry(() => import("../pages/user/VehiclePage"));
+const FamilyTree = lazyRetry(() => import("../pages/user/FamilyTree"));
+const SearchPage = lazyRetry(() => import("../pages/user/SearchPage"));
+const UserProfile = lazyRetry(() => import("../pages/user/UserProfile"));
+const UserSearches = lazyRetry(() => import("../pages/user/UserSearches"));
+const UserTransactions = lazyRetry(() => import("../pages/user/UserTransactions"));
+const ChangePassword = lazyRetry(() => import("../pages/user/ChangePassword"));
+const ResellerUsers = lazyRetry(() => import("../pages/reseller/ResellerUsers"));
+const EmailsInbox = lazyRetry(() => import("../pages/shared/EmailsInbox"));
 
 export default function App() {
   const { user } = useAuth();
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={!user ? <Login /> : <Navigate to={user.role === "ADMIN" ? "/admin/dashboard" : user.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard"} replace />} />
-        <Route path="/signup" element={!user ? <Signup /> : <Navigate to={user.role === "ADMIN" ? "/admin/dashboard" : user.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard"} replace />} />
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/login" element={!user ? <Login /> : <Navigate to={user.role === "ADMIN" ? "/admin/dashboard" : user.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard"} replace />} />
+          <Route path="/signup" element={!user ? <Signup /> : <Navigate to={user.role === "ADMIN" ? "/admin/dashboard" : user.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard"} replace />} />
 
-        <Route
-          path="/admin"
-          element={
-            <RoleGate roles={["ADMIN"]}>
-              <AdminLayout />
-            </RoleGate>
-          }
-        >
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="api-management" element={<AdminApis />} />
-          <Route path="user-management" element={<AdminUsers />} />
-          <Route path="transactions" element={<AdminTransactions />} />
-          <Route path="security" element={<AdminSecurity />} />
-          <Route path="activity-logs" element={<AdminActivity />} />
-          <Route index element={<Navigate to="/admin/dashboard" replace />} />
-        </Route>
+          <Route element={<ProtectedRoute roles={["ADMIN"]} />}>
+            <Route path="/admin" element={<DashboardLayout />}>
+              <Route path="dashboard" element={<AdminOverview />} />
+              <Route path="stats" element={<AdminOverview />} />
+              <Route path="overview" element={<AdminOverview />} />
+              <Route path="api-management" element={<AdminApis />} />
+              <Route path="user-management" element={<AdminUsers />} />
+              <Route path="transactions" element={<AdminTransactions />} />
+              <Route path="security" element={<AdminSecurity />} />
+              <Route path="profile" element={<UserProfile />} />
+              <Route path="emails" element={<EmailsInbox />} />
+              <Route path="activity" element={<AdminActivity />} />
+              <Route path="activity-logs" element={<AdminActivity />} />
+              <Route index element={<Navigate to="/admin/dashboard" replace />} />
+            </Route>
+          </Route>
 
-        <Route
-          path="/user"
-          element={
-            <RoleGate roles={["USER"]}>
-              <UserLayout />
-            </RoleGate>
-          }
-        >
-          <Route path="dashboard" element={<UserDashboard />} />
-          <Route path="cnic-intelligence" element={<IntelligenceCnic />} />
-          <Route path="mobile-intelligence" element={<IntelligenceMobile />} />
-          <Route path="vehicle/:region" element={<VehiclePage />} />
-          <Route path="family-tree" element={<FamilyTree />} />
-          <Route path="profile" element={<UserProfile />} />
-          <Route path="settings/searches" element={<UserSearches />} />
-          <Route path="settings/transactions" element={<UserTransactions />} />
-          <Route path="settings/change-password" element={<ChangePassword />} />
-          <Route index element={<Navigate to="/user/dashboard" replace />} />
-        </Route>
+          <Route element={<ProtectedRoute roles={["USER"]} />}>
+            <Route path="/user" element={<DashboardLayout />}>
+              <Route path="dashboard" element={<UserOverview />} />
+              <Route path="home" element={<UserOverview />} />
+              <Route path="cnic-intelligence" element={<IntelligenceCnic />} />
+              <Route path="mobile-intelligence" element={<IntelligenceMobile />} />
+              <Route path="vehicle/:region" element={<VehiclePage />} />
+              <Route path="family-tree" element={<FamilyTree />} />
+              <Route path="service/:slug" element={<SearchPage />} />
+              <Route path="profile" element={<UserProfile />} />
+              <Route path="emails" element={<EmailsInbox />} />
+              <Route path="settings/searches" element={<UserSearches />} />
+              <Route path="settings/transactions" element={<UserTransactions />} />
+              <Route path="settings/change-password" element={<ChangePassword />} />
+              <Route index element={<Navigate to="/user/dashboard" replace />} />
+            </Route>
+          </Route>
 
-        <Route
-          path="/reseller"
-          element={
-            <RoleGate roles={["RESELLER"]}>
-              <ResellerLayout />
-            </RoleGate>
-          }
-        >
-          <Route path="dashboard" element={<UserDashboard />} />
-          <Route path="cnic-intelligence" element={<IntelligenceCnic />} />
-          <Route path="mobile-intelligence" element={<IntelligenceMobile />} />
-          <Route path="vehicle/:region" element={<VehiclePage />} />
-          <Route path="family-tree" element={<FamilyTree />} />
-          <Route path="profile" element={<UserProfile />} />
-          <Route path="users" element={<ResellerUsers />} />
-          <Route path="settings/searches" element={<UserSearches />} />
-          <Route path="settings/transactions" element={<UserTransactions />} />
-          <Route path="settings/change-password" element={<ChangePassword />} />
-          <Route index element={<Navigate to="/reseller/dashboard" replace />} />
-        </Route>
+          <Route element={<ProtectedRoute roles={["RESELLER"]} />}>
+            <Route path="/reseller" element={<DashboardLayout />}>
+              <Route path="dashboard" element={<ResellerOverview />} />
+              <Route path="home" element={<ResellerOverview />} />
+              <Route path="cnic-intelligence" element={<IntelligenceCnic />} />
+              <Route path="mobile-intelligence" element={<IntelligenceMobile />} />
+              <Route path="vehicle/:region" element={<VehiclePage />} />
+              <Route path="family-tree" element={<FamilyTree />} />
+              <Route path="service/:slug" element={<SearchPage />} />
+              <Route path="profile" element={<UserProfile />} />
+              <Route path="emails" element={<EmailsInbox />} />
+              <Route path="users" element={<ResellerUsers />} />
+              <Route path="settings/searches" element={<UserSearches />} />
+              <Route path="settings/transactions" element={<UserTransactions />} />
+              <Route path="settings/change-password" element={<ChangePassword />} />
+              <Route index element={<Navigate to="/reseller/dashboard" replace />} />
+            </Route>
+          </Route>
 
-        <Route path="/" element={<Navigate to={user ? (user.role === "ADMIN" ? "/admin/dashboard" : user.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard") : "/login"} replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          <Route path="/" element={<RoleRedirect />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
+  );
+}
+
+function RouteFallback() {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(135deg, #071120 0%, #0f172a 46%, #134e4a 100%)",
+        color: "#e2e8f0",
+        fontWeight: 700,
+        letterSpacing: "0.03em",
+      }}
+    >
+      Loading workspace...
+    </div>
   );
 }

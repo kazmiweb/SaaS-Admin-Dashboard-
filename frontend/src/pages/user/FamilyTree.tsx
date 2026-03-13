@@ -1,9 +1,14 @@
 import React from "react";
-import { Box, Button, Heading, HStack, Input, Stack, Text, useToast } from "@chakra-ui/react";
+import { Box, Button, Heading, Input, Stack, Text, useToast } from "@chakra-ui/react";
+import { useTheme as useMuiTheme } from "@mui/material";
 import { api } from "../../app/api";
+import { issueSearchToken } from "../../app/searchToken";
+import { getDashboardUi } from "../../dashboard/uiTokens";
 import FamilyTreeGraph from "./components/FamilyTreeGraph";
 
 export default function FamilyTree() {
+  const muiTheme = useMuiTheme();
+  const ui = getDashboardUi(muiTheme.palette.mode);
   const toast = useToast();
   const [cnic, setCnic] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -18,7 +23,8 @@ export default function FamilyTree() {
     setLoading(true);
     setPayload(null);
     try {
-      const res = await api.get("/search/family-tree", { params: { cnic: d } });
+      const searchToken = await issueSearchToken();
+      const res = await api.get("/search/family-tree", { params: { cnic: d }, headers: { "x-search-token": searchToken } });
       setPayload(res.data);
       toast({ status: "success", title: "Family tree loaded", position: "top" });
     } catch (e: any) {
@@ -28,38 +34,51 @@ export default function FamilyTree() {
     }
   }
 
+  async function copyGraph() {
+    if (!payload) return;
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    toast({ status: "success", title: "Family tree graph copied", position: "top" });
+  }
+
   return (
-    <Box>
+    <Box color={ui.text.primary}>
       <Heading size="lg" mb={4}>
         Mix Family Tree
       </Heading>
-      <Box bg="rgba(255,255,255,0.06)" border="1px solid rgba(255,255,255,0.08)" borderRadius="22px" p={{ base: 4, md: 6 }}>
+      <Text opacity={0.85} mb={4}>
+        ENTER Your CNIC to render Family Tree Graph
+      </Text>
+      <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="22px" p={{ base: 4, md: 6 }}>
         <Stack spacing={4}>
-          <HStack flexWrap="wrap" gap={3}>
-            <Input
-              value={cnic}
-              onChange={(e) => setCnic(e.target.value)}
-              placeholder="Enter CNIC (13 digits)"
-              size="lg"
-              borderRadius="16px"
-              bg="rgba(0,0,0,0.25)"
-              border="1px solid rgba(255,255,255,0.12)"
-              _placeholder={{ color: "whiteAlpha.600" }}
-              maxW={{ base: "100%", md: "420px" }}
-            />
+          <Input
+            value={cnic}
+            onChange={(e) => setCnic(e.target.value)}
+            placeholder="Enter CNIC (13 digits)"
+            size="lg"
+            borderRadius="16px"
+            bg={ui.surface.input}
+            border={`1px solid ${ui.surface.inputBorder}`}
+            color={ui.text.primary}
+            _placeholder={{ color: ui.text.muted }}
+            maxW={{ base: "100%", md: "420px" }}
+          />
+          <Stack direction={{ base: "column", md: "row" }} spacing={3}>
             <Button colorScheme="blue" borderRadius="999px" size="lg" onClick={run} isLoading={loading}>
               Search
             </Button>
-            <Button variant="outline" borderRadius="999px" size="lg" onClick={() => setCnic("")}
-              isDisabled={loading}
-            >
+            <Button variant="outline" borderRadius="999px" size="lg" onClick={() => setCnic("")} isDisabled={loading}>
               Clear
             </Button>
-          </HStack>
+            {payload ? (
+              <Button colorScheme="green" borderRadius="999px" size="lg" onClick={copyGraph}>
+                Copy to Clipboard
+              </Button>
+            ) : null}
+          </Stack>
 
           {!payload ? (
             <Box pt={8} pb={6} textAlign="center">
-              <Text opacity={0.8}>Enter a CNIC to render the family tree graph.</Text>
+              <Text opacity={0.8}>Enter Your CNIC to render Family Tree Graph.</Text>
             </Box>
           ) : (
             <FamilyTreeGraph payload={payload} />

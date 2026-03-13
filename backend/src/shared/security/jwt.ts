@@ -5,7 +5,8 @@ import { HttpError } from "../http/errors.js";
 export type JwtPayload = {
   sub: string;
   role: "ADMIN" | "RESELLER" | "USER";
-  type: "access" | "refresh" | "signup" | "api_key";
+  type: "access" | "refresh" | "signup" | "api_key" | "search_request";
+  sid?: string;
 };
 
 const accessSecret = process.env.JWT_ACCESS_SECRET ?? "dev_access";
@@ -68,5 +69,28 @@ export function verifyApiKeyJwt(token: string): { payload: JwtPayload; jti: stri
     return { payload, jti: String(jti ?? ""), scopes: String(scopes ?? "") };
   } catch {
     throw new HttpError(401, "UNAUTHORIZED", "Invalid or expired API key JWT");
+  }
+}
+
+export function signSearchRequestToken(userId: string, role: JwtPayload["role"], sessionId?: string) {
+  const ttl = Math.max(20, Number(process.env.SEARCH_REQUEST_TOKEN_TTL_SECONDS ?? 90));
+  return jwt.sign(
+    { sub: userId, role, type: "search_request", ...(sessionId ? { sid: sessionId } : {}) } satisfies JwtPayload,
+    accessSecret,
+    { expiresIn: ttl, jwtid: nanoid() }
+  );
+}
+
+export function verifySearchRequestToken(token: string): { payload: JwtPayload; jti: string } {
+  try {
+    const decoded = jwt.verify(token, accessSecret, { complete: true }) as any;
+    const payload = decoded?.payload as JwtPayload;
+    const jti = String(decoded?.payload?.jti ?? decoded?.header?.jti ?? "");
+    if (!payload || payload.type !== "search_request" || !payload.sub || !jti) {
+      throw new Error("bad token");
+    }
+    return { payload, jti };
+  } catch {
+    throw new HttpError(401, "UNAUTHORIZED", "Invalid or expired search token");
   }
 }

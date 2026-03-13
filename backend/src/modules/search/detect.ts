@@ -2,7 +2,7 @@ export type Detected = { type: "CNIC"|"PHONE"|"ENGINE"|"CHASSIS"|"REGISTRATION"|
 
 const reCnic = /^\d{13}$/;
 const rePhonePk = /^(03\d{9}|92\d{10,11}|923\d{9})$/; // lenient
-const reReg = /^[A-Z]{1,4}-?\d{1,4}-?\d{1,6}$/i;
+const reReg = /^(?:[A-Z]{1,4}-?\d{1,4}(?:-?\d{1,6})?|(?:[A-Z]{1,4}-){1,3}\d{1,6})$/i;
 const reEngine = /^[A-Z0-9\-]{5,25}$/i;
 const reChassis = /^[A-HJ-NPR-Z0-9\-]{8,25}$/i;
 
