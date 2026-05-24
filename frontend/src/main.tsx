@@ -16,15 +16,17 @@ import "@fontsource/open-sans/600.css";
 import "@fontsource/roboto/400.css";
 import "@fontsource/roboto/500.css";
 
+const chakraInitialColorMode = (theme as any)?.config?.initialColorMode ?? "dark";
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <DashboardThemeProvider>
-      <ChakraProvider theme={theme}>
-        <ColorModeScript initialColorMode={theme.config.initialColorMode} />
+    <ChakraProvider theme={theme}>
+      <ColorModeScript initialColorMode={chakraInitialColorMode} />
+      <DashboardThemeProvider>
         <ErrorBoundary>
           <AuthProvider><App /></AuthProvider>
         </ErrorBoundary>
-      </ChakraProvider>
-    </DashboardThemeProvider>
+      </DashboardThemeProvider>
+    </ChakraProvider>
   </React.StrictMode>
 );

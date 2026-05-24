@@ -1,9 +1,8 @@
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
-import DeleteRoundedIcon from "@mui/icons-material/DeleteRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
+import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
-import SwapHorizRoundedIcon from "@mui/icons-material/SwapHorizRounded";
 import {
   Alert,
   Box,
@@ -19,6 +18,7 @@ import {
   Divider,
   FormControlLabel,
   Grid,
+  Menu,
   MenuItem,
   Stack,
   Table,
@@ -28,12 +28,15 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import * as yup from "yup";
 import { api } from "../../app/api";
 import { getDashboardUi } from "../../dashboard/uiTokens";
+import { getRoleLabel } from "../../utils/roleLabels";
 
 type ApiAuthType = "NONE" | "API_KEY_HEADER" | "BEARER_TOKEN" | "BASIC_AUTH" | "SESSION_LOGIN" | "OAUTH2";
 type ApiAuthConfig = { key?: string; value?: string; token?: string; username?: string; password?: string };
@@ -183,6 +186,11 @@ type ApiFormState = {
   }>;
 };
 
+type RowActionTarget =
+  | { kind: "api"; item: ApiItem }
+  | { kind: "service"; item: ServiceItem }
+  | { kind: "health"; item: ApiHealthItem };
+
 type ServiceLinkFormItem = {
   apiId: string;
   enabled: boolean;
@@ -191,6 +199,27 @@ type ServiceLinkFormItem = {
 
 function boolChip(value: boolean) {
   return <Chip size="small" label={value ? "Active" : "Inactive"} color={value ? "success" : "default"} variant="outlined" />;
+}
+
+function boolChipLabel(value: boolean, onLabel: string, offLabel: string) {
+  return <Chip size="small" label={value ? onLabel : offLabel} color={value ? "success" : "default"} variant="outlined" />;
+}
+
+function formatWholeNumber(value: unknown) {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return "0";
+  return Math.round(parsed).toLocaleString("en-US");
+}
+
+function getHealthStatusLabel(item: ApiHealthItem) {
+  const status = String(item.status ?? "").toUpperCase();
+  const on = status === "HEALTHY";
+  const labelBase = on ? "On" : "Off";
+  const isPost = String(item.method ?? "").toUpperCase() === "POST";
+  return {
+    label: isPost ? `${labelBase} POST` : labelBase,
+    color: on ? ("success" as const) : ("warning" as const),
+  };
 }
 
 function getDefaultAuthConfig(authType: ApiAuthType): ApiAuthConfig {
@@ -368,7 +397,9 @@ function blurActiveElement() {
 }
 
 export default function AdminApis() {
+  const [searchParams] = useSearchParams();
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const ui = getDashboardUi(theme.palette.mode);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -386,6 +417,8 @@ export default function AdminApis() {
   const [testResponse, setTestResponse] = useState("");
   const [testingApi, setTestingApi] = useState(false);
   const [apiErrors, setApiErrors] = useState<Record<string, string>>({});
+  const [actionsAnchorEl, setActionsAnchorEl] = useState<HTMLElement | null>(null);
+  const [actionsTarget, setActionsTarget] = useState<RowActionTarget | null>(null);
   const [apiForm, setApiForm] = useState<ApiFormState>(createEmptyApiForm);
   const [svcForm, setSvcForm] = useState({
     name: "",
@@ -434,6 +467,16 @@ export default function AdminApis() {
       [item.name, item.type, item.icon, item.description].filter(Boolean).join(" ").toLowerCase().includes(needle)
     );
   }, [services, query]);
+
+  const healthFilter = searchParams.get("health");
+  const filteredHealthItems = useMemo(() => {
+    const value = (healthFilter ?? "").toUpperCase();
+    if (!value) return healthItems;
+    if (value === "HEALTHY") return healthItems.filter((item) => String(item.status || "").toUpperCase() === "HEALTHY");
+    if (value === "UNHEALTHY") return healthItems.filter((item) => String(item.status || "").toUpperCase() === "UNHEALTHY");
+    if (value === "DISABLED") return healthItems.filter((item) => !item.apiEnabled);
+    return healthItems;
+  }, [healthFilter, healthItems]);
 
   function openCreateApi() {
     blurActiveElement();
@@ -788,6 +831,27 @@ export default function AdminApis() {
     }
   }
 
+  function openRowActions(event: MouseEvent<HTMLElement>, target: RowActionTarget) {
+    setActionsAnchorEl(event.currentTarget);
+    setActionsTarget(target);
+  }
+
+  function closeRowActions() {
+    setActionsAnchorEl(null);
+    setActionsTarget(null);
+  }
+
+  const rowActionButtonSx = {
+    minWidth: { xs: 64, md: 72 },
+    height: { xs: 26, md: 28 },
+    borderRadius: 999,
+    px: 1.1,
+    fontWeight: 700,
+    fontSize: { xs: "0.64rem", md: "0.72rem" },
+    textTransform: "none",
+    whiteSpace: "nowrap",
+  };
+
   return (
     <Stack spacing={3}>
       <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" spacing={2}>
@@ -830,13 +894,11 @@ export default function AdminApis() {
                   </Button>
                 </Stack>
               </Stack>
-              <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: 520, minHeight: 520, pr: 1 }}>
-                <Table size="small">
+              <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: { xs: 360, md: 520 }, minHeight: { xs: 300, md: 520 }, pr: 1 }}>
+                <Table size="small" sx={{ "& th, & td": { whiteSpace: "nowrap" } }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Name</TableCell>
-                      <TableCell>Method</TableCell>
-                      <TableCell align="right">Credits</TableCell>
+                      <TableCell>API Name</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
@@ -845,58 +907,21 @@ export default function AdminApis() {
                     {filteredApis.map((item) => (
                       <TableRow key={item.id} hover>
                         <TableCell>
-                          <Typography fontWeight={800}>{item.name}</Typography>
-                          <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-all" }}>
-                            {item.baseUrl}
-                            {item.endpoint}
+                          <Typography fontWeight={800} sx={{ whiteSpace: "nowrap", fontSize: "0.6rem" }}>
+                            {item.name}
                           </Typography>
-                          <Stack direction="row" flexWrap="wrap" gap={0.75} mt={1}>
-                            {[item.supportsCnic && "CNIC", item.supportsPhone && "Mobile", item.supportsEngine && "Engine", item.supportsChassis && "Chassis", item.supportsReg && "Reg", item.supportsLicense && "License"]
-                              .filter(Boolean)
-                              .map((label) => (
-                                <Chip key={`${item.id}-${label}`} size="small" variant="outlined" label={label} />
-                              ))}
-                            {!([item.supportsCnic, item.supportsPhone, item.supportsEngine, item.supportsChassis, item.supportsReg, item.supportsLicense].some(Boolean)) ? (
-                              <Typography variant="caption" color="text.secondary">
-                                No query types configured
-                              </Typography>
-                            ) : null}
-                          </Stack>
-                          <Stack direction="row" flexWrap="wrap" gap={0.75} mt={1}>
-                            {(item.serviceApis ?? []).length
-                              ? (item.serviceApis ?? []).map((link) => (
-                                  <Chip
-                                    key={`${item.id}-${link.serviceId}`}
-                                    size="small"
-                                    color={link.enabled ? "primary" : "default"}
-                                    variant={link.enabled ? "filled" : "outlined"}
-                                    label={`${link.priority}. ${link.service?.name ?? link.serviceId}`}
-                                  />
-                                ))
-                              : (
-                                <Typography variant="caption" color="text.secondary">
-                                  No services mapped
-                                </Typography>
-                              )}
-                          </Stack>
                         </TableCell>
-                        <TableCell>
-                          <Chip size="small" label={item.method} variant="outlined" />
-                        </TableCell>
-                        <TableCell align="right">{item.creditsPerSearch ?? 1}</TableCell>
                         <TableCell>{boolChip(Boolean(item.status))}</TableCell>
                         <TableCell align="right">
-                          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="flex-end" spacing={0.5} alignItems={{ xs: "stretch", sm: "center" }}>
-                            <Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEditApi(item)}>
-                              Edit
-                            </Button>
-                            <Button size="small" startIcon={<SwapHorizRoundedIcon />} onClick={() => toggleApi(item.id)}>
-                              Toggle
-                            </Button>
-                            <Button size="small" color="error" startIcon={<DeleteRoundedIcon />} onClick={() => deleteApi(item.id)}>
-                              Delete
-                            </Button>
-                          </Stack>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            sx={rowActionButtonSx}
+                            endIcon={<KeyboardArrowDownRoundedIcon fontSize="inherit" />}
+                            onClick={(event) => openRowActions(event, { kind: "api", item })}
+                          >
+                            Actions
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -916,13 +941,12 @@ export default function AdminApis() {
                   Add Service
                 </Button>
               </Stack>
-              <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: 520, minHeight: 520, pr: 1 }}>
-                <Table size="small">
+              <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: { xs: 360, md: 520 }, minHeight: { xs: 300, md: 520 }, pr: 1 }}>
+                <Table size="small" sx={{ "& th, & td": { whiteSpace: "nowrap" } }}>
                   <TableHead>
                     <TableRow>
                       <TableCell>Name</TableCell>
-                      <TableCell>Type</TableCell>
-                      <TableCell align="right">Runtime</TableCell>
+                      <TableCell align="right">Total Earn</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
@@ -931,38 +955,26 @@ export default function AdminApis() {
                     {filteredServices.map((item) => (
                       <TableRow key={item.id} hover>
                         <TableCell>
-                          <Typography fontWeight={800}>{item.name}</Typography>
-                          {item.description ? (
-                            <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>
-                              {item.description}
-                            </Typography>
-                          ) : null}
-                          <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: ui.text.secondary }}>
-                            Searches: {item.metrics?.totalSearches ?? 0} | Success: {item.metrics?.successRate ?? 0}% | APIs: {item.metrics?.activeMappedApis ?? 0}
+                          <Typography fontWeight={800} sx={{ whiteSpace: "nowrap", fontSize: "0.6rem" }}>
+                            {item.name}
                           </Typography>
                         </TableCell>
-                        <TableCell>
-                          <Chip size="small" label={item.type ?? "Search"} variant="outlined" />
-                        </TableCell>
                         <TableCell align="right">
-                          <Typography fontWeight={700}>{item.metrics?.runtimeCost ?? 0} credits</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Stored default: {item.defaultCost ?? 1}
+                          <Typography fontWeight={700} sx={{ whiteSpace: "nowrap" }}>
+                            {formatWholeNumber(item.metrics?.totalRevenueCredits ?? 0)}
                           </Typography>
                         </TableCell>
-                        <TableCell>{boolChip(Boolean(item.status))}</TableCell>
+                        <TableCell>{boolChipLabel(Boolean(item.status), "On", "Off")}</TableCell>
                         <TableCell align="right">
-                          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="flex-end" spacing={0.5} alignItems={{ xs: "stretch", sm: "center" }}>
-                            <Button size="small" startIcon={<EditRoundedIcon />} onClick={() => openEditService(item)}>
-                              Edit
-                            </Button>
-                            <Button size="small" startIcon={<SwapHorizRoundedIcon />} onClick={() => toggleService(item.id)}>
-                              Toggle
-                            </Button>
-                            <Button size="small" color="error" startIcon={<DeleteRoundedIcon />} onClick={() => deleteService(item.id)}>
-                              Delete
-                            </Button>
-                          </Stack>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            sx={rowActionButtonSx}
+                            endIcon={<KeyboardArrowDownRoundedIcon fontSize="inherit" />}
+                            onClick={(event) => openRowActions(event, { kind: "service", item })}
+                          >
+                            Actions
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1041,54 +1053,46 @@ export default function AdminApis() {
             </Button>
           </Stack>
           <Box sx={{ overflowX: "auto" }}>
-            <Table size="small">
+            <Table size="small" sx={{ "& th, & td": { whiteSpace: "nowrap" } }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>API</TableCell>
+                  <TableCell>API Name</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Latency</TableCell>
-                  <TableCell>Mappings</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {healthItems.map((item) => (
+                {filteredHealthItems.map((item) => (
                   <TableRow key={item.id} hover>
                     <TableCell>
-                      <Typography fontWeight={800}>{item.name}</Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-all" }}>
-                        {item.method} {item.endpoint}
+                      <Typography fontWeight={800} fontSize={{ xs: "0.6rem", md: "0.6rem" }} sx={{ whiteSpace: "nowrap" }}>
+                        {item.name}
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Chip
-                        size="small"
-                        label={item.status || "UNKNOWN"}
-                        color={item.status === "HEALTHY" ? "success" : item.status === "UNHEALTHY" ? "warning" : "default"}
-                        variant="outlined"
-                      />
+                      {(() => {
+                        const mapped = getHealthStatusLabel(item);
+                        return <Chip size="small" label={mapped.label} color={mapped.color} variant="outlined" />;
+                      })()}
                     </TableCell>
-                    <TableCell>{item.rollingLatencyMs ? `${item.rollingLatencyMs} ms` : "-"}</TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        {item.serviceMappings.map((mapping) => `${mapping.serviceName} (#${mapping.priority})`).join(", ") || "No mappings"}
-                      </Typography>
-                    </TableCell>
+                    <TableCell sx={{ fontSize: { xs: "0.72rem", md: "0.82rem" } }}>{item.rollingLatencyMs ? `${item.rollingLatencyMs} ms` : "-"}</TableCell>
                     <TableCell align="right">
-                      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="flex-end" spacing={0.5}>
-                        <Button size="small" variant="outlined" onClick={() => probeApiHealthItem(item)}>
-                          Probe
-                        </Button>
-                        <Button size="small" variant="outlined" onClick={() => toggleApiHealthItem(item)}>
-                          {item.apiEnabled ? "Disable" : "Enable"}
-                        </Button>
-                      </Stack>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        sx={rowActionButtonSx}
+                        endIcon={<KeyboardArrowDownRoundedIcon fontSize="inherit" />}
+                        onClick={(event) => openRowActions(event, { kind: "health", item })}
+                      >
+                        Actions
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
-                {!healthItems.length ? (
+                {!filteredHealthItems.length ? (
                   <TableRow>
-                    <TableCell colSpan={5}>
+                    <TableCell colSpan={4}>
                       <Typography color="text.secondary">No API health records available.</Typography>
                     </TableCell>
                   </TableRow>
@@ -1099,7 +1103,101 @@ export default function AdminApis() {
         </CardContent>
       </Card>
 
-      <Dialog open={apiOpen} onClose={() => { blurActiveElement(); setApiOpen(false); }} fullWidth maxWidth="md">
+      <Menu
+        anchorEl={actionsAnchorEl}
+        open={Boolean(actionsAnchorEl && actionsTarget)}
+        onClose={closeRowActions}
+        keepMounted
+      >
+        {actionsTarget?.kind === "api" ? (
+          <>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                openEditApi(item);
+              }}
+            >
+              Edit
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                void toggleApi(item.id);
+              }}
+            >
+              {actionsTarget.item.status ? "Pause" : "Start"}
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                void deleteApi(item.id);
+              }}
+            >
+              Delete
+            </MenuItem>
+          </>
+        ) : null}
+
+        {actionsTarget?.kind === "service" ? (
+          <>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                openEditService(item);
+              }}
+            >
+              Edit
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                void toggleService(item.id);
+              }}
+            >
+              {actionsTarget.item.status ? "Pause" : "Start"}
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                void deleteService(item.id);
+              }}
+            >
+              Delete
+            </MenuItem>
+          </>
+        ) : null}
+
+        {actionsTarget?.kind === "health" ? (
+          <>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                void probeApiHealthItem(item);
+              }}
+            >
+              Probe
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                const item = actionsTarget.item;
+                closeRowActions();
+                void toggleApiHealthItem(item);
+              }}
+            >
+              {actionsTarget.item.apiEnabled ? "Pause" : "Start"}
+            </MenuItem>
+          </>
+        ) : null}
+      </Menu>
+
+      <Dialog open={apiOpen} onClose={() => { blurActiveElement(); setApiOpen(false); }} fullWidth fullScreen={isMobile} maxWidth="md">
         <DialogTitle>{editingApi ? "Edit API" : "Add API"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ pt: 1 }}>
@@ -1543,19 +1641,19 @@ export default function AdminApis() {
                   <Grid item xs={12} sm={4}>
                     <FormControlLabel
                       control={<Checkbox checked={apiForm.allowUser} onChange={(e) => setApiForm((prev) => ({ ...prev, allowUser: e.target.checked }))} />}
-                      label="User"
+                      label={getRoleLabel("USER")}
                     />
                   </Grid>
                   <Grid item xs={12} sm={4}>
                     <FormControlLabel
                       control={<Checkbox checked={apiForm.allowReseller} onChange={(e) => setApiForm((prev) => ({ ...prev, allowReseller: e.target.checked }))} />}
-                      label="Reseller"
+                      label={getRoleLabel("RESELLER")}
                     />
                   </Grid>
                   <Grid item xs={12} sm={4}>
                     <FormControlLabel
                       control={<Checkbox checked={apiForm.allowAdmin} onChange={(e) => setApiForm((prev) => ({ ...prev, allowAdmin: e.target.checked }))} />}
-                      label="Admin"
+                      label={getRoleLabel("ADMIN")}
                     />
                   </Grid>
                 </Grid>
@@ -1587,7 +1685,7 @@ export default function AdminApis() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={serviceOpen} onClose={() => { blurActiveElement(); setServiceOpen(false); }} fullWidth maxWidth="sm">
+      <Dialog open={serviceOpen} onClose={() => { blurActiveElement(); setServiceOpen(false); }} fullWidth fullScreen={isMobile} maxWidth="sm">
         <DialogTitle>{editingSvc ? "Edit Service" : "Add Service"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ pt: 1 }}>
@@ -1654,7 +1752,7 @@ export default function AdminApis() {
                               label={apiItem.name}
                             />
                             <Typography variant="caption" color="text.secondary" sx={{ display: "block", ml: 4 }}>
-                              {apiItem.method} | {apiItem.creditsPerSearch ?? 1} credits | {apiItem.baseUrl}{apiItem.endpoint}
+                              {apiItem.method} | {apiItem.creditsPerSearch ?? 1} credits
                             </Typography>
                           </Box>
                           <TextField

@@ -10,7 +10,20 @@ import { nanoid } from "nanoid";
 import { signApiKeyJwt } from "../../shared/security/jwt.js";
 import { listApiHealth, probeApiHealth, toggleApiHealth, updateApiPriority } from "../health/apiHealth.service.js";
 import { listActivityLogs, listAdminActions, listSecurityEvents, recordAdminAction } from "../audit/audit.service.js";
-import { blacklistUser, getSecuritySummary, listAuthFailures, listIpAbuse, resetUserDevice, suspendUser } from "../security/security.service.js";
+import {
+  blacklistUser,
+  clearTempIpBlock,
+  getSecuritySummary,
+  getTempBlockedIps,
+  listAuthFailures,
+  listBlockedIps,
+  listIpAbuse,
+  removeIpFromList,
+  resetUserDevice,
+  setIpListType,
+  suspendUser,
+  whitelistUser,
+} from "../security/security.service.js";
 import {
   exportActivityCsv,
   exportApiPerformanceCsv,
@@ -19,6 +32,7 @@ import {
   exportUsersCsv,
 } from "../export/exportCenter.service.js";
 import { syncApiMappingsForApi, syncManagedApiMappings } from "./apiMapping.service.js";
+import { isInternalApiConfig } from "../../shared/internalApis.js";
 import {
   getActiveUsersSummary,
   getRealtimeErrorsSummary,
@@ -47,6 +61,15 @@ function parseDateInput(value: unknown): Date | undefined {
   }
   return parsed;
 }
+
+const RENEW_PACKAGE_CONFIG = {
+  MONTHLY_30: { days: 30, coins: 300, label: "30 Days Package (1 Month)" },
+  DAYS_15: { days: 15, coins: 150, label: "15 Days Package" },
+  WEEKLY_7: { days: 7, coins: 80, label: "7 Days Package (1 Week)" },
+  DEMO_1: { days: 1, coins: 10, label: "Demo 1 Day Package (24 Hours)" },
+} as const;
+
+type RenewPackageCode = keyof typeof RENEW_PACKAGE_CONFIG;
 
 function buildApiPayload(input: Record<string, any>) {
   const authType = String(input.authType ?? "NONE").toUpperCase();
@@ -109,12 +132,12 @@ function withApiComputedConfig<T extends Record<string, any>>(apiConfig: T) {
     session_config:
       apiConfig.authType === "SESSION_LOGIN"
         ? {
-            loginUrl: apiConfig.loginUrl ?? "",
-            usernameField: apiConfig.usernameField ?? "",
-            passwordField: apiConfig.passwordField ?? "",
-            captchaEnabled: Boolean(apiConfig.captchaEnabled),
-            sessionPolicy: apiConfig.sessionPolicy ?? "",
-          }
+          loginUrl: apiConfig.loginUrl ?? "",
+          usernameField: apiConfig.usernameField ?? "",
+          passwordField: apiConfig.passwordField ?? "",
+          captchaEnabled: Boolean(apiConfig.captchaEnabled),
+          sessionPolicy: apiConfig.sessionPolicy ?? "",
+        }
         : {},
     rate_limit_config: {
       maxPerMinute: apiConfig.maxPerMinute ?? null,
@@ -242,16 +265,17 @@ async function listServicesWithMetrics() {
       totalRevenueCredits: 0,
       lastSearchAt: null,
     };
-    const activeLinks = service.serviceApis.filter((item) => item.enabled && item.api.status);
+    const visibleServiceApis = service.serviceApis.filter((item) => !isInternalApiConfig(item.api));
+    const activeLinks = visibleServiceApis.filter((item) => item.enabled && item.api.status);
     const runtimeCost = activeLinks.reduce((sum, item) => sum + (item.api.creditsPerSearch ?? 0), 0);
 
     return {
       ...service,
-      serviceApis: service.serviceApis,
+      serviceApis: visibleServiceApis,
       metrics: {
         ...metrics,
         successRate: metrics.totalSearches ? Number(((metrics.successSearches / metrics.totalSearches) * 100).toFixed(2)) : 0,
-        mappedApis: service.serviceApis.length,
+        mappedApis: visibleServiceApis.length,
         activeMappedApis: activeLinks.length,
         runtimeCost,
       },
@@ -456,7 +480,7 @@ adminRouter.post("/api-health/:id/probe", async (req: Request, res: Response) =>
 
 adminRouter.get("/stats", async (_req: Request, res: Response) => {
   const since = new Date();
-  since.setHours(0,0,0,0);
+  since.setHours(0, 0, 0, 0);
 
   const [totalUsers, activeUsers, activeApis, searchesToday, revenueToday] = await Promise.all([
     prisma.user.count(),
@@ -493,7 +517,7 @@ adminRouter.get("/stats", async (_req: Request, res: Response) => {
 // New metrics endpoints (preferred by frontend)
 adminRouter.get("/metrics/summary", async (_req: Request, res: Response) => {
   const since = new Date();
-  since.setHours(0,0,0,0);
+  since.setHours(0, 0, 0, 0);
 
   const [totalUsers, activeUsers, activeServices, revenueToday] = await Promise.all([
     prisma.user.count(),
@@ -568,7 +592,7 @@ adminRouter.post("/users", async (req: Request, res: Response) => {
     name: z.string().min(2).max(80),
     password: z.string().min(8).max(128).optional(),
     passwordHash: z.string().min(10).optional(),
-    role: z.enum(["ADMIN","RESELLER","USER"]),
+    role: z.enum(["ADMIN", "RESELLER", "USER"]),
     credits: z.number().int().min(0).default(0),
     expireAt: z.string().datetime().optional(),
     resellerId: z.string().optional()
@@ -671,19 +695,19 @@ adminRouter.get("/apis", async (_req: Request, res: Response) => {
       },
     },
   });
-  const items = apis.map((item) => withApiComputedConfig(item));
+  const items = apis.filter((item) => !isInternalApiConfig(item)).map((item) => withApiComputedConfig(item));
   res.json({ status: "success", apis: items });
 });
 
 adminRouter.post("/apis", async (req: Request, res: Response) => {
   const body = z.object({
     name: z.string().min(2),
-    method: z.enum(["GET","POST"]),
+    method: z.enum(["GET", "POST"]),
     baseUrl: z.string().url(),
     endpoint: z.string().optional().default(""),
     queryParam: z.string().min(1).optional(),
     description: z.string().optional(),
-    authType: z.enum(["NONE","API_KEY_HEADER","BEARER_TOKEN","BASIC_AUTH","SESSION_LOGIN","OAUTH2"]).default("NONE"),
+    authType: z.enum(["NONE", "API_KEY_HEADER", "BEARER_TOKEN", "BASIC_AUTH", "SESSION_LOGIN", "OAUTH2"]).default("NONE"),
     apiKeyHeader: z.string().optional(),
     apiKeyValue: z.string().optional(),
     bearerToken: z.string().optional(),
@@ -845,7 +869,13 @@ adminRouter.post("/services", async (req: Request, res: Response) => {
     include: { serviceApis: { include: { api: true }, orderBy: { priority: "asc" } } }
   });
 
-  res.json({ status: "success", service });
+  res.json({
+    status: "success",
+    service: {
+      ...service,
+      serviceApis: service.serviceApis.filter((item) => !isInternalApiConfig(item.api)),
+    },
+  });
 });
 
 // Update service including API assignments (used by Admin API Management matrix UI)
@@ -906,7 +936,13 @@ adminRouter.put("/services/:id", async (req: Request, res: Response) => {
     });
   });
 
-  res.json({ status: "success", service: updated });
+  res.json({
+    status: "success",
+    service: {
+      ...updated,
+      serviceApis: updated.serviceApis.filter((item) => !isInternalApiConfig(item.api)),
+    },
+  });
 });
 
 
@@ -916,14 +952,103 @@ adminRouter.get("/recent-searches", async (_req: Request, res: Response) => {
     take: 10,
     include: { user: { select: { id: true, email: true, name: true } }, service: { select: { name: true } } }
   });
-  res.json({ status: "success", items: rows.map(r => ({
-    id: r.id,
-    user: r.user,
-    query: r.query,
-    service: r.service?.name ?? "—",
-    status: r.status,
-    createdAt: r.createdAt
-  })) });
+  const resolveServiceName = (row: (typeof rows)[number]) => {
+    const direct = row.service?.name?.trim();
+    if (direct) return direct;
+
+    const payload = row.results as any;
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const explicit = [payload.serviceName, payload.service, payload.service_name].find((value) => typeof value === "string" && value.trim());
+      if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+      if (Array.isArray(payload.results)) {
+        const sourceName = payload.results.find((item: any) => typeof item?.apiName === "string" && item.apiName.trim())?.apiName;
+        if (typeof sourceName === "string" && sourceName.trim()) return sourceName.trim();
+      }
+    }
+
+    if (Array.isArray(payload)) {
+      const sourceName = payload.find((item: any) => typeof item?.apiName === "string" && item.apiName.trim())?.apiName;
+      if (typeof sourceName === "string" && sourceName.trim()) return sourceName.trim();
+    }
+
+    return row.detectedType || "Unknown";
+  };
+  res.json({
+    status: "success", items: rows.map(r => ({
+      id: r.id,
+      user: r.user,
+      userName: r.user?.name ?? r.user?.email ?? "Unknown user",
+      query: r.query,
+      service: resolveServiceName(r),
+      searchedService: resolveServiceName(r),
+      status: r.status,
+      ip: r.ip,
+      createdAt: r.createdAt
+    }))
+  });
+});
+
+adminRouter.get(["/search-history", "/user-logs"], async (req: Request, res: Response) => {
+  const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? "50"), 10) || 50));
+  const skip = (page - 1) * limit;
+
+  const [rows, total] = await Promise.all([
+    prisma.searchHistory.findMany({
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        service: { select: { name: true } },
+      },
+    }),
+    prisma.searchHistory.count(),
+  ]);
+
+  const resolveServiceName = (row: (typeof rows)[number]) => {
+    const direct = row.service?.name?.trim();
+    if (direct) return direct;
+
+    const payload = row.results as any;
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const explicit = [payload.serviceName, payload.service, payload.service_name].find((value) => typeof value === "string" && value.trim());
+      if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+      if (Array.isArray(payload.results)) {
+        const sourceName = payload.results.find((item: any) => typeof item?.apiName === "string" && item.apiName.trim())?.apiName;
+        if (typeof sourceName === "string" && sourceName.trim()) return sourceName.trim();
+      }
+    }
+
+    if (Array.isArray(payload)) {
+      const sourceName = payload.find((item: any) => typeof item?.apiName === "string" && item.apiName.trim())?.apiName;
+      if (typeof sourceName === "string" && sourceName.trim()) return sourceName.trim();
+    }
+
+    return row.detectedType || "Unknown";
+  };
+
+  res.json({
+    status: "success",
+    page,
+    limit,
+    total,
+    items: rows.map((r) => ({
+      id: r.id,
+      user: r.user,
+      userName: r.user?.name ?? r.user?.email ?? "Unknown user",
+      userEmail: r.user?.email ?? null,
+      query: r.query,
+      detectedType: r.detectedType,
+      status: r.status,
+      cost: r.cost,
+      ip: r.ip,
+      service: resolveServiceName(r),
+      searchedService: resolveServiceName(r),
+      createdAt: r.createdAt,
+      dateTime: r.createdAt,
+    })),
+  });
 });
 
 adminRouter.get("/top-users", async (_req: Request, res: Response) => {
@@ -1008,7 +1133,13 @@ adminRouter.get("/service-api-matrix", async (_req, res) => {
     prisma.apiConfig.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.serviceApi.findMany(),
   ]);
-  res.json({ status: "success", services, apis, links });
+  const hiddenApiIds = new Set(apis.filter((api) => isInternalApiConfig(api)).map((api) => api.id));
+  res.json({
+    status: "success",
+    services,
+    apis: apis.filter((api) => !hiddenApiIds.has(api.id)),
+    links: links.filter((link) => !hiddenApiIds.has(link.apiId)),
+  });
 });
 
 // Replace mappings for a service (supports enabled/priority)
@@ -1034,10 +1165,18 @@ adminRouter.put("/services/:id/apis", async (req, res) => {
 
   const service = await prisma.service.findUnique({
     where: { id },
-    include: { serviceApis: true },
+    include: { serviceApis: { include: { api: true } } },
   });
 
-  res.json({ status: "success", service });
+  res.json({
+    status: "success",
+    service: service
+      ? {
+          ...service,
+          serviceApis: service.serviceApis.filter((item) => !isInternalApiConfig(item.api)),
+        }
+      : null,
+  });
 });
 
 
@@ -1095,11 +1234,11 @@ adminRouter.get("/transactions", async (req: Request, res: Response) => {
     ...(userId ? { userId } : {}),
     ...(resellerId || billingType
       ? {
-          user: {
-            ...(resellerId ? { resellerId } : {}),
-            ...(billingType ? { billingType } : {}),
-          },
-        }
+        user: {
+          ...(resellerId ? { resellerId } : {}),
+          ...(billingType ? { billingType } : {}),
+        },
+      }
       : {}),
   };
 
@@ -1153,8 +1292,8 @@ adminRouter.get("/audit/security-events", async (req: Request, res: Response) =>
 
 
 adminRouter.get("/metrics/overview-v2", async (_req: Request, res: Response) => {
-  const start = new Date(); start.setHours(0,0,0,0);
-  const end = new Date(); end.setHours(23,59,59,999);
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const end = new Date(); end.setHours(23, 59, 59, 999);
 
   const [usersTotal, usersActive, apisTotal, apisActive, svcsTotal, svcsActive, txAgg, coinsAgg] = await Promise.all([
     prisma.user.count(),
@@ -1365,6 +1504,118 @@ adminRouter.post("/users-full/:id/extend-expiry", async (req: Request, res: Resp
   res.json({ status: "success", item });
 });
 
+adminRouter.post("/users-full/:id/renew-package", async (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  const auth = (req as any).auth as { sub: string };
+  const ip = (req as any).clientIp ?? "unknown";
+  const body = z
+    .object({
+      packageCode: z.enum(["MONTHLY_30", "DAYS_15", "WEEKLY_7", "DEMO_1"]),
+    })
+    .parse(req.body ?? {});
+
+  const pack = RENEW_PACKAGE_CONFIG[body.packageCode as RenewPackageCode];
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      email: true,
+      credits: true,
+      expireAt: true,
+      billingType: true,
+      revenueExcluded: true,
+    },
+  });
+  if (!user) return res.status(404).json({ status: "error", message: "User not found" });
+
+  const now = new Date();
+  const hasActivePackage = !user.expireAt || user.expireAt.getTime() >= now.getTime();
+  const renewalBase = hasActivePackage && user.expireAt ? new Date(user.expireAt) : now;
+  const nextExpireAt = new Date(renewalBase.getTime() + pack.days * 24 * 60 * 60 * 1000);
+  const nextCredits = hasActivePackage ? (user.credits ?? 0) + pack.coins : pack.coins;
+  const nextBillingType = body.packageCode === "DEMO_1" ? "DEMO" : "PAID";
+  const nextRevenueExcluded = resolveRevenueExcluded(nextBillingType, false);
+
+  const item = await prisma.$transaction(async (tx) => {
+    if (!hasActivePackage && (user.credits ?? 0) > 0) {
+      await tx.creditLog.create({
+        data: {
+          userId: id,
+          delta: -(user.credits ?? 0),
+          reason: "Old coins expired before package renewal",
+          actorId: auth.sub,
+        },
+      });
+    }
+
+    const updated = await tx.user.update({
+      where: { id },
+      data: {
+        credits: nextCredits,
+        expireAt: nextExpireAt,
+        status: "ACTIVE",
+        billingType: nextBillingType,
+        revenueExcluded: nextRevenueExcluded,
+        monthlyPackageCoins: pack.coins,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        status: true,
+        credits: true,
+        expireAt: true,
+        resellerId: true,
+        billingType: true,
+        revenueExcluded: true,
+        monthlyPackageCoins: true,
+        createdAt: true,
+      },
+    });
+
+    await tx.creditLog.create({
+      data: {
+        userId: id,
+        delta: pack.coins,
+        reason: `Package renewed (${pack.label})`,
+        actorId: auth.sub,
+      },
+    });
+
+    if (nextBillingType === "PAID" && isRevenueEligibleUser(updated)) {
+      await tx.transaction.create({
+        data: {
+          userId: id,
+          amountPkr: pack.coins * 10,
+          coins: pack.coins,
+          note: `PACKAGE_RENEWAL_${body.packageCode}`,
+        },
+      });
+    }
+
+    return updated;
+  });
+
+  await recordAdminAction({
+    actorId: auth.sub,
+    action: "ADMIN_RENEW_PACKAGE",
+    ip,
+    meta: {
+      userId: id,
+      packageCode: body.packageCode,
+      packageDays: pack.days,
+      packageCoins: pack.coins,
+      carryForward: hasActivePackage,
+      previousCredits: user.credits ?? 0,
+      nextCredits: item.credits ?? 0,
+      nextExpireAt: item.expireAt ? item.expireAt.toISOString() : null,
+    },
+  });
+
+  res.json({ status: "success", item });
+});
+
 adminRouter.post("/notifications/send", async (req: Request, res: Response) => {
   const auth = (req as any).auth as { sub: string };
   const ip = (req as any).clientIp ?? "unknown";
@@ -1492,6 +1743,17 @@ adminRouter.post("/security/users/:id/blacklist", async (req: Request, res: Resp
   res.json({ status: "success", item });
 });
 
+adminRouter.post("/security/users/:id/whitelist", async (req: Request, res: Response) => {
+  const body = z.object({ reason: z.string().max(300).optional() }).parse(req.body ?? {});
+  const item = await whitelistUser({
+    userId: req.params.id,
+    actorId: ((req as any).auth as { sub: string }).sub,
+    ip: (req as any).clientIp ?? "unknown",
+    reason: body.reason,
+  });
+  res.json({ status: "success", item });
+});
+
 adminRouter.post("/security/users/:id/reset-device", async (req: Request, res: Response) => {
   const item = await resetUserDevice({
     userId: req.params.id,
@@ -1507,8 +1769,54 @@ adminRouter.get("/security/ip-abuse", async (req: Request, res: Response) => {
   res.json({ status: "success", ...payload });
 });
 
+adminRouter.get("/security/blocked-ips", async (req: Request, res: Response) => {
+  const limit = Number(req.query.limit ?? 50);
+  const page = Number(req.query.page ?? 1);
+  const [blocked, tempBlocked] = await Promise.all([
+    listBlockedIps(limit, page),
+    getTempBlockedIps(limit * 3),
+  ]);
+  res.json({ status: "success", ...blocked, tempBlocked });
+});
+
 adminRouter.get("/security/auth-failures", async (req: Request, res: Response) => {
   const limit = Number(req.query.limit ?? 50);
-  const items = await listAuthFailures(limit);
-  res.json({ status: "success", items });
+  const page = Number(req.query.page ?? 1);
+  const payload = await listAuthFailures(limit, page);
+  res.json({ status: "success", ...payload });
+});
+
+adminRouter.post("/security/ip/:ip/blacklist", async (req: Request, res: Response) => {
+  const ip = decodeURIComponent(String(req.params.ip ?? "")).trim();
+  const body = z.object({ reason: z.string().max(300).optional() }).parse(req.body ?? {});
+  const item = await setIpListType({
+    ip,
+    type: "BLACKLIST",
+    reason: body.reason ?? "Blocked by admin",
+  });
+  res.json({ status: "success", item });
+});
+
+adminRouter.post("/security/ip/:ip/whitelist", async (req: Request, res: Response) => {
+  const ip = decodeURIComponent(String(req.params.ip ?? "")).trim();
+  const body = z.object({ reason: z.string().max(300).optional() }).parse(req.body ?? {});
+  const item = await setIpListType({
+    ip,
+    type: "WHITELIST",
+    reason: body.reason ?? "Whitelisted by admin",
+  });
+  res.json({ status: "success", item });
+});
+
+adminRouter.post("/security/ip/:ip/unblock", async (req: Request, res: Response) => {
+  const ip = decodeURIComponent(String(req.params.ip ?? "")).trim();
+  const item = await removeIpFromList(ip);
+  await clearTempIpBlock(ip);
+  res.json({ status: "success", item });
+});
+
+adminRouter.post("/security/ip/:ip/clear-temp", async (req: Request, res: Response) => {
+  const ip = decodeURIComponent(String(req.params.ip ?? "")).trim();
+  const item = await clearTempIpBlock(ip);
+  res.json({ status: "success", item });
 });

@@ -195,10 +195,22 @@ async function issueMessage(input: {
   assignedAdminId?: string | null;
 }) {
   const messageId = nanoid(12);
-  const participants = Array.from(new Set(input.participants.filter(Boolean)));
+  const requestedParticipants = Array.from(new Set([
+    ...input.participants,
+    input.senderUserId ?? "",
+  ].filter(Boolean)));
+  const existingUsers = await prisma.user.findMany({
+    where: { id: { in: requestedParticipants } },
+    select: { id: true },
+  });
+  const existingUserIds = new Set(existingUsers.map((item) => item.id));
+  const participants = requestedParticipants.filter((userId) => existingUserIds.has(userId));
   if (!participants.length) {
     throw new HttpError(503, "SUPPORT_UNAVAILABLE", "No admin accounts available for support inbox");
   }
+  const senderUserId = input.senderUserId && existingUserIds.has(input.senderUserId) ? input.senderUserId : null;
+  const threadOwnerId = input.threadOwnerId && existingUserIds.has(input.threadOwnerId) ? input.threadOwnerId : null;
+  const assignedAdminId = input.assignedAdminId && existingUserIds.has(input.assignedAdminId) ? input.assignedAdminId : null;
 
   const meta = buildMeta({
     token: input.token,
@@ -212,8 +224,8 @@ async function issueMessage(input: {
     contactEmail: input.contactEmail,
     contactName: input.contactName,
     contactPhone: input.contactPhone,
-    threadOwnerId: input.threadOwnerId,
-    assignedAdminId: input.assignedAdminId,
+    threadOwnerId,
+    assignedAdminId,
   });
 
   await prisma.notification.createMany({
@@ -223,8 +235,8 @@ async function issueMessage(input: {
       category: SUPPORT_CATEGORY,
       title: input.subject,
       message: input.body,
-      isRead: userId === input.senderUserId,
-      readAt: userId === input.senderUserId ? new Date() : null,
+      isRead: userId === senderUserId,
+      readAt: userId === senderUserId ? new Date() : null,
       meta,
     })),
     skipDuplicates: true,
@@ -494,7 +506,9 @@ supportRouter.post("/public/:token/messages", async (req: Request, res: Response
   const adminIds = admins.map((item) => item.id);
   const threadOwnerId = snapshot.meta.threadOwnerId ?? null;
   const participants = [...adminIds, ...(threadOwnerId ? [threadOwnerId] : [])];
-  const nextStatus = snapshot.meta.status === "RESOLVED" || snapshot.meta.status === "CLOSED" ? "OPEN" : snapshot.meta.status;
+  if (snapshot.meta.status === "RESOLVED" || snapshot.meta.status === "CLOSED") {
+    throw new HttpError(403, "TICKET_CLOSED", "This ticket is closed. New messages are not allowed.");
+  }
 
   const created = await issueMessage({
     token,
@@ -502,7 +516,7 @@ supportRouter.post("/public/:token/messages", async (req: Request, res: Response
     senderUserId: threadOwnerId,
     participants,
     subject: snapshot.meta.subject,
-    status: nextStatus,
+    status: snapshot.meta.status,
     source: snapshot.meta.source,
     category: snapshot.meta.category,
     priority: snapshot.meta.priority,
@@ -599,9 +613,12 @@ supportRouter.post("/tickets/:id/messages", requireAuth, async (req: Request, re
   const threadOwnerId = snapshot.meta.threadOwnerId ?? null;
   const participants = [...adminIds, ...(threadOwnerId ? [threadOwnerId] : [])];
   const senderType: SenderType = actor.role === "ADMIN" ? "ADMIN" : "USER";
+  if (snapshot.meta.status === "RESOLVED" || snapshot.meta.status === "CLOSED") {
+    throw new HttpError(403, "TICKET_CLOSED", "This ticket is closed. New messages are not allowed.");
+  }
   const nextStatus: SupportStatus = senderType === "ADMIN"
     ? (snapshot.meta.status === "OPEN" ? "IN_PROGRESS" : snapshot.meta.status)
-    : (snapshot.meta.status === "RESOLVED" || snapshot.meta.status === "CLOSED" ? "OPEN" : snapshot.meta.status);
+    : snapshot.meta.status;
 
   const created = await issueMessage({
     token,

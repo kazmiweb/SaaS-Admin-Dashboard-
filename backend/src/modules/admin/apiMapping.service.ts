@@ -1,5 +1,6 @@
 import type { ApiConfig, Prisma } from "@prisma/client";
 import { prisma } from "../../shared/prisma.js";
+import { isInternalApiConfig } from "../../shared/internalApis.js";
 
 export const MANAGED_SERVICE_NAMES = [
   "Elookup Search",
@@ -87,6 +88,16 @@ export function inferManagedServiceNames(
 }
 
 async function syncSingleApiMappings(db: Prisma.TransactionClient, api: ApiConfig): Promise<MappingResult> {
+  if (isInternalApiConfig(api)) {
+    return {
+      apiId: api.id,
+      apiName: api.name,
+      matchedServices: [],
+      createdLinks: 0,
+      updatedLinks: 0,
+      removedLinks: 0,
+    };
+  }
   const matchedServices = inferManagedServiceNames(api);
   const managedServices = await db.service.findMany({
     where: { name: { in: [...MANAGED_SERVICE_NAMES] } },

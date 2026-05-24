@@ -9,22 +9,30 @@ export type AuthContext = {
 };
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction) {
-  // 1) Session cookie (preferred for USER/RESELLER web sessions)
   const sess = (req as any).session as { userId: string; role: JwtPayload["role"] } | undefined;
+
+  // 1) Prefer explicit bearer token when present.
+  const header = req.headers.authorization ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (token) {
+    try {
+      const payload = verifyAccess(token);
+      if (payload.type !== "access") throw new HttpError(401, "UNAUTHORIZED", "Wrong token type");
+      (req as any).auth = payload as any;
+      return next();
+    } catch (error) {
+      // If a valid web session exists, keep USER/RESELLER flows working even with stale bearer tokens.
+      if (!(sess?.userId && sess?.role)) throw error;
+    }
+  }
+
+  // 2) Fallback to session cookie (USER/RESELLER web sessions).
   if (sess?.userId && sess?.role) {
     (req as any).auth = { sub: sess.userId, role: sess.role, type: "session" } satisfies AuthContext;
     return next();
   }
 
-  // 2) Bearer access token
-  const header = req.headers.authorization ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  if (!token) throw new HttpError(401, "UNAUTHORIZED", "Missing bearer token");
-
-  const payload = verifyAccess(token);
-  if (payload.type !== "access") throw new HttpError(401, "UNAUTHORIZED", "Wrong token type");
-  (req as any).auth = payload as any;
-  next();
+  throw new HttpError(401, "UNAUTHORIZED", "Missing bearer token");
 }
 
 export function requireRole(...roles: JwtPayload["role"][]) {

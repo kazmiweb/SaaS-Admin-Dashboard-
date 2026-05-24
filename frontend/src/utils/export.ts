@@ -1,5 +1,4 @@
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 function flatten(obj: any, prefix = "", out: Record<string, any> = {}) {
   if (obj === null || obj === undefined) return out;
@@ -95,135 +94,164 @@ export function downloadClientPdf(params: {
   sections?: Array<{ heading: string; rows: any[] }>;
   rawJson?: any;
 }) {
-  const { filename, title, subtitle, sections = [], rawJson } = params;
-  const companyName = import.meta.env.VITE_REPORT_COMPANY_NAME || "Elookup Intelligence";
+  const { filename, title, subtitle, sections = [] } = params;
+  const companyName = import.meta.env.VITE_REPORT_COMPANY_NAME || "Trace Verisys Intelligence";
   const generatedAt = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
   const doc = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 40;
+  const margin = 34;
+  const contentWidth = pageWidth - margin * 2;
+  const footerY = pageHeight - 22;
+  const maxContentY = pageHeight - 48;
+  let currentPage = 1;
+  let y = 44;
 
-  doc.setFillColor(11, 58, 110);
-  doc.rect(0, 0, pageWidth, 88, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(19);
-  doc.text(companyName, margin, 34);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text("Official Intelligence Report", margin, 52);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text(title, pageWidth - margin, 34, { align: "right" });
-
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(margin, 108, pageWidth - margin * 2, 78, 8, 8, "FD");
-  doc.setTextColor(15, 23, 42);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text("Report Metadata", margin + 10, 125);
-  doc.setFont("helvetica", "normal");
-  doc.text(`Generated: ${generatedAt}`, margin + 10, 143);
-  doc.text(`Subtitle: ${subtitle || "-"}`, margin + 10, 158);
-  doc.text(`Categories: ${sections.length}`, pageWidth / 2, 143);
-
-  let y = 210;
-  sections.forEach((sec, index) => {
-    const sectionRows = (sec.rows || [])
-      .slice(0, 500)
-      .flatMap((row: any, rowIndex: number) => {
-        const detailRows = rowsForRecord(row);
-        if (!detailRows.length) return [];
-        const prefix = detailRows.length > 1 ? `Record #${rowIndex + 1} • ` : "";
-        return detailRows.map((detail) => [prefix + detail.label, detail.value]);
-      })
-      .slice(0, 900);
-
-    if (!sectionRows.length) return;
-
-    doc.setFillColor(15, 76, 129);
-    doc.rect(margin, y, pageWidth - margin * 2, 22, "F");
+  const drawPageHeader = (isFirstPage: boolean) => {
+    doc.setFillColor(10, 54, 122);
+    doc.rect(0, 0, pageWidth, isFirstPage ? 88 : 56, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text(`Category ${index + 1}: ${sec.heading}`, margin + 8, y + 15, { maxWidth: pageWidth - margin * 2 - 16 });
-    y += 24;
+    doc.setFontSize(isFirstPage ? 18 : 13);
+    doc.text(companyName, margin, isFirstPage ? 34 : 29);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.text("Intelligence Report", margin, isFirstPage ? 51 : 42);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(isFirstPage ? 11 : 10);
+    doc.text(title, pageWidth - margin, isFirstPage ? 34 : 29, { align: "right", maxWidth: 230 });
+  };
 
-    autoTable(doc, {
-      startY: y,
-      head: [["Field", "Value"]],
-      body: sectionRows,
-      margin: { left: margin, right: margin },
-      styles: {
-        fontSize: 8.2,
-        cellPadding: 4,
-        textColor: [15, 23, 42],
-      },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      headStyles: {
-        fillColor: [30, 41, 59],
-        textColor: [255, 255, 255],
-        fontStyle: "bold",
-      },
-      columnStyles: {
-        0: { cellWidth: 170, fontStyle: "bold" },
-        1: { cellWidth: pageWidth - margin * 2 - 170 },
-      },
-    });
-
-    // @ts-expect-error jspdf-autotable augment
-    y = ((doc as any).lastAutoTable?.finalY ?? y) + 14;
-    if (y > pageHeight - 120) {
-      doc.addPage();
-      y = 54;
-    }
-  });
-
-  if (y > pageHeight - 110) {
-    doc.addPage();
-    y = 54;
-  }
-
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(margin, y, pageWidth - margin * 2, 74, 8, 8, "FD");
-  doc.setTextColor(71, 85, 105);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("Verification & Sign-off", margin + 10, y + 18);
-  doc.setDrawColor(100, 116, 139);
-  doc.line(margin + 20, y + 50, margin + 200, y + 50);
-  doc.line(pageWidth - margin - 200, y + 50, pageWidth - margin - 20, y + 50);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  doc.text("Prepared By", margin + 20, y + 62);
-  doc.text("Authorized Signatory", pageWidth - margin - 200, y + 62);
-
-  if (rawJson) {
-    const raw = JSON.stringify(rawJson, null, 2);
-    const snippet = raw.length > 2400 ? raw.slice(0, 2400) + "\n…" : raw;
-    doc.addPage();
-    autoTable(doc, {
-      startY: 52,
-      head: [["Appendix", "Truncated JSON Snapshot"]],
-      body: [["Raw Payload", snippet]],
-      margin: { left: margin, right: margin },
-      styles: { fontSize: 7.8, cellPadding: 4 },
-      columnStyles: { 0: { cellWidth: 120, fontStyle: "bold" }, 1: { cellWidth: pageWidth - margin * 2 - 120 } },
-      headStyles: { fillColor: [30, 41, 59] },
-    });
-  }
-
-  const pages = doc.getNumberOfPages();
-  for (let page = 1; page <= pages; page += 1) {
-    doc.setPage(page);
+  const drawFooter = () => {
     doc.setTextColor(100, 116, 139);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-    doc.text(`${companyName} • Confidential`, margin, pageHeight - 20);
-    doc.text(`Page ${page} of ${pages}`, pageWidth - margin, pageHeight - 20, { align: "right" });
+    doc.text(`${companyName} • Confidential`, margin, footerY);
+    doc.text(`Page ${currentPage}`, pageWidth - margin, footerY, { align: "right" });
+  };
+
+  const addPage = () => {
+    drawFooter();
+    doc.addPage();
+    currentPage += 1;
+    drawPageHeader(false);
+    y = 72;
+  };
+
+  const ensureSpace = (height: number) => {
+    if (y + height <= maxContentY) return;
+    addPage();
+  };
+
+  const splitLines = (text: string, width: number, maxLines: number) => {
+    const safe = text?.trim() ? text : "-";
+    const lines = doc.splitTextToSize(safe, width) as string[];
+    if (lines.length <= maxLines) return lines;
+    const trimmed = lines.slice(0, maxLines);
+    const last = trimmed[maxLines - 1] ?? "";
+    trimmed[maxLines - 1] = last.length > 2 ? `${last.slice(0, -2)}..` : `${last}..`;
+    return trimmed;
+  };
+
+  drawPageHeader(true);
+  y = 108;
+
+  doc.setFillColor(241, 245, 249);
+  doc.setDrawColor(191, 219, 254);
+  doc.roundedRect(margin, y, contentWidth, 68, 8, 8, "FD");
+  doc.setTextColor(30, 64, 175);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("Report Overview", margin + 10, y + 18);
+  doc.setTextColor(15, 23, 42);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Generated: ${generatedAt}`, margin + 10, y + 34);
+  doc.text(`Query: ${subtitle ? subtitle.replace(/^Query:\s*/i, "") : "-"}`, margin + 10, y + 48);
+  doc.text(`Total APIs: ${sections.length}`, margin + 10, y + 62);
+  y += 84;
+
+  let hasPrintableContent = false;
+
+  sections.forEach((section, sectionIndex) => {
+    const records = (section.rows || []).slice(0, 220);
+    const cards = records
+      .map((row, rowIndex) => {
+        const fields = rowsForRecord(row).slice(0, 50);
+        if (!fields.length) return null;
+        const recordNo = (row && typeof row === "object" && "record" in row) ? (row as any).record : rowIndex + 1;
+        const titleText = typeof recordNo === "number" || typeof recordNo === "string" ? `Record ${recordNo}` : `Record ${rowIndex + 1}`;
+        return { title: titleText, fields };
+      })
+      .filter((item): item is { title: string; fields: Array<{ label: string; value: string }> } => Boolean(item));
+
+    if (!cards.length) return;
+    hasPrintableContent = true;
+
+    ensureSpace(36);
+    doc.setFillColor(59, 130, 246);
+    doc.setDrawColor(37, 99, 235);
+    doc.roundedRect(margin, y, contentWidth, 24, 6, 6, "FD");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(`${sectionIndex + 1}. ${section.heading}`, margin + 9, y + 16, { maxWidth: contentWidth - 18 });
+    y += 32;
+
+    cards.forEach((card) => {
+      const labelWidth = 130;
+      const valueWidth = contentWidth - 32 - labelWidth;
+      let estimatedHeight = 34;
+      card.fields.forEach((field) => {
+        const valueLines = splitLines(field.value, valueWidth, 4);
+        estimatedHeight += Math.max(14, valueLines.length * 9.6) + 6;
+      });
+      estimatedHeight += 8;
+
+      ensureSpace(estimatedHeight + 8);
+
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(191, 219, 254);
+      doc.roundedRect(margin, y, contentWidth, estimatedHeight, 8, 8, "FD");
+
+      doc.setFillColor(219, 234, 254);
+      doc.roundedRect(margin + 8, y + 8, 92, 16, 4, 4, "F");
+      doc.setTextColor(30, 64, 175);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.8);
+      doc.text(card.title, margin + 14, y + 19, { maxWidth: 80 });
+
+      let fieldY = y + 33;
+      card.fields.forEach((field) => {
+        const label = splitLines(field.label, labelWidth, 1)[0] || "-";
+        const valueLines = splitLines(field.value, valueWidth, 4);
+        const rowHeight = Math.max(14, valueLines.length * 9.6);
+
+        doc.setTextColor(71, 85, 105);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.4);
+        doc.text(label, margin + 12, fieldY, { maxWidth: labelWidth });
+
+        doc.setTextColor(15, 23, 42);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.6);
+        doc.text(valueLines, margin + 16 + labelWidth, fieldY, { maxWidth: valueWidth, lineHeightFactor: 1.1 });
+
+        fieldY += rowHeight + 6;
+      });
+
+      y += estimatedHeight + 10;
+    });
+  });
+
+  if (!hasPrintableContent) {
+    ensureSpace(48);
+    doc.setTextColor(71, 85, 105);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("No printable records found for this report.", margin, y + 10);
   }
 
+  drawFooter();
   doc.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
 }

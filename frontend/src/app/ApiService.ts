@@ -17,8 +17,72 @@ export const api = axios.create({
 
 let refreshPromise: Promise<string | null> | null = null;
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("accessToken");
+function safeGetStorageItem(key: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetStorageItem(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore storage write failures
+  }
+}
+
+function safeRemoveStorageItem(key: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore storage write failures
+  }
+}
+
+function clearStoredAuth() {
+  safeRemoveStorageItem("accessToken");
+  safeRemoveStorageItem("refreshToken");
+  safeRemoveStorageItem("role");
+}
+
+function readJwtExp(token: string) {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const decoded = JSON.parse(atob(padded));
+    return typeof decoded?.exp === "number" ? decoded.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+api.interceptors.request.use(async (config) => {
+  let token = safeGetStorageItem("accessToken");
+  const refreshToken = safeGetStorageItem("refreshToken");
+
+  if (token && refreshToken) {
+    const exp = readJwtExp(token);
+    const now = Math.floor(Date.now() / 1000);
+    if (exp && exp <= now + 20) {
+      try {
+        refreshPromise ??= refreshAccessToken().finally(() => {
+          refreshPromise = null;
+        });
+        const nextAccessToken = await refreshPromise;
+        if (nextAccessToken) token = nextAccessToken;
+      } catch {
+        // keep existing token; response interceptor will handle auth failures
+      }
+    }
+  }
+
   if (token) {
     config.headers = config.headers ?? {};
     config.headers.Authorization = `Bearer ${token}`;
@@ -27,7 +91,7 @@ api.interceptors.request.use((config) => {
 });
 
 async function refreshAccessToken() {
-  const refreshToken = localStorage.getItem("refreshToken");
+  const refreshToken = safeGetStorageItem("refreshToken");
   if (!refreshToken) return null;
 
   const response = await axios.post(
@@ -44,9 +108,9 @@ async function refreshAccessToken() {
     return null;
   }
 
-  localStorage.setItem("accessToken", nextAccessToken);
-  localStorage.setItem("refreshToken", nextRefreshToken);
-  localStorage.setItem("role", nextRole);
+  safeSetStorageItem("accessToken", nextAccessToken);
+  safeSetStorageItem("refreshToken", nextRefreshToken);
+  safeSetStorageItem("role", nextRole);
   return nextAccessToken;
 }
 
@@ -54,13 +118,19 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error?.config;
+    const requestUrl = String(originalRequest?.url ?? "");
+    const meBootstrapRequest = requestUrl === "/me" || requestUrl.startsWith("/me?");
+
+    if (error?.response?.status === 404 && meBootstrapRequest) {
+      clearStoredAuth();
+    }
 
     if (
       error?.response?.status === 401 &&
       originalRequest &&
       !originalRequest._retry &&
-      !String(originalRequest.url ?? "").includes("/auth/login") &&
-      !String(originalRequest.url ?? "").includes("/auth/refresh")
+      !requestUrl.includes("/auth/login") &&
+      !requestUrl.includes("/auth/refresh")
     ) {
       originalRequest._retry = true;
 
@@ -81,10 +151,11 @@ api.interceptors.response.use(
     }
 
     if (error?.response?.status === 401) {
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("role");
-      window.location.href = "/login";
+      clearStoredAuth();
+      // Let auth screens and /me bootstrap flow handle route changes.
+      if (!requestUrl.startsWith("/me")) {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }

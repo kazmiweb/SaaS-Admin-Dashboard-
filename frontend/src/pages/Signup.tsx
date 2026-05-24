@@ -1,11 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  Chip,
   Divider,
   Link as MuiLink,
   Stack,
@@ -17,6 +16,13 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../app/api";
 import { setTokens } from "../app/auth";
 import { getDeviceId } from "../app/device";
+import {
+  extractCooldownSeconds,
+  extractExpiresInSeconds,
+  extractRetryAfterSeconds,
+  normalizeEmailInput,
+  normalizeOtpInput,
+} from "../utils/otp";
 
 export default function Signup() {
   const nav = useNavigate();
@@ -28,14 +34,41 @@ export default function Signup() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [otpCooldownLeft, setOtpCooldownLeft] = useState(0);
+  const [otpExpiresInLeft, setOtpExpiresInLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (otpCooldownLeft <= 0 && (!otpExpiresInLeft || otpExpiresInLeft <= 0)) return;
+    const timer = window.setInterval(() => {
+      setOtpCooldownLeft((prev) => (prev > 0 ? prev - 1 : 0));
+      setOtpExpiresInLeft((prev) => {
+        if (prev === null) return prev;
+        return prev > 0 ? prev - 1 : 0;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [otpCooldownLeft, otpExpiresInLeft]);
+
+  function applyOtpMeta(data: any) {
+    const cooldown = extractCooldownSeconds(data);
+    if (cooldown) setOtpCooldownLeft(cooldown);
+    const expiresIn = extractExpiresInSeconds(data);
+    if (expiresIn) setOtpExpiresInLeft(expiresIn);
+  }
 
   async function requestOtp() {
     setErr(null);
+    const normalizedEmail = normalizeEmailInput(email);
+    setEmail(normalizedEmail);
     setBusy(true);
     try {
-      await api.post("/auth/request-otp", { email });
+      const resp = await api.post("/auth/request-otp", { email: normalizedEmail });
+      applyOtpMeta(resp?.data);
+      setOtp("");
       setStep(2);
     } catch (ex: any) {
+      const waitSeconds = extractRetryAfterSeconds(ex);
+      if (waitSeconds) setOtpCooldownLeft(waitSeconds);
       setErr(ex?.response?.data?.message ?? "OTP send failed");
     } finally {
       setBusy(false);
@@ -44,9 +77,12 @@ export default function Signup() {
 
   async function verifyOtp() {
     setErr(null);
+    const normalizedEmail = normalizeEmailInput(email);
+    const normalizedOtp = normalizeOtpInput(otp);
+    setOtp(normalizedOtp);
     setBusy(true);
     try {
-      const resp = await api.post("/auth/verify-otp", { email, otp });
+      const resp = await api.post("/auth/verify-otp", { email: normalizedEmail, otp: normalizedOtp });
       setSignupToken(resp.data.signupToken);
       setStep(3);
     } catch (ex: any) {
@@ -62,7 +98,7 @@ export default function Signup() {
     try {
       const deviceId = getDeviceId();
       const resp = await api.post("/auth/complete-signup", { signupToken, name, password, deviceId });
-      setTokens(null, null, resp.data.role);
+      setTokens(resp.data.accessToken ?? null, resp.data.refreshToken ?? null, resp.data.role);
       nav("/user/dashboard");
     } catch (ex: any) {
       setErr(ex?.response?.data?.message ?? "Signup failed");
@@ -84,33 +120,7 @@ export default function Signup() {
       }}
     >
       <Grid container spacing={4} alignItems="center" justifyContent="center">
-        <Grid item xs={12} lg={5}>
-          <Stack spacing={2.5} sx={{ maxWidth: 560, color: "common.white" }}>
-            <Chip
-              label="OTP Signup"
-              sx={{
-                alignSelf: "flex-start",
-                bgcolor: "rgba(255,255,255,0.08)",
-                color: "common.white",
-                borderRadius: 999,
-                fontWeight: 800,
-              }}
-            />
-            <Typography variant="h3" sx={{ fontWeight: 900, lineHeight: 1.05 }}>
-              Create your Elookup account with verified email onboarding.
-            </Typography>
-            <Typography sx={{ color: "rgba(255,255,255,0.72)", maxWidth: 520 }}>
-              The signup flow remains backend-driven. Email OTP verification, device binding, and post-signup role routing are preserved.
-            </Typography>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} pt={1}>
-              <FlowPill label="Email verification" active={step >= 1} />
-              <FlowPill label="OTP confirm" active={step >= 2} />
-              <FlowPill label="Account setup" active={step >= 3} />
-            </Stack>
-          </Stack>
-        </Grid>
-
-        <Grid item xs={12} md={10} lg={4}>
+        <Grid item xs={12} md={10} lg={5}>
           <Card
             sx={{
               borderRadius: 6,
@@ -152,17 +162,28 @@ export default function Signup() {
                 {step === 2 ? (
                   <Stack spacing={2.5}>
                     <Typography variant="body2" color="text.secondary">
-                      OTP sent to <strong>{email}</strong>. It expires in 10 minutes.
+                      OTP sent to <strong>{email}</strong>.{" "}
+                      {otpExpiresInLeft && otpExpiresInLeft > 0
+                        ? `Expires in ${Math.ceil(otpExpiresInLeft / 60)}m ${otpExpiresInLeft % 60}s.`
+                        : "Use the code quickly before it expires."}
                     </Typography>
                     <TextField
                       label="6-digit OTP"
                       value={otp}
-                      onChange={(e) => setOtp(e.target.value)}
+                      onChange={(e) => setOtp(normalizeOtpInput(e.target.value))}
                       fullWidth
                     />
                     <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                       <Button variant="contained" onClick={verifyOtp} disabled={busy} fullWidth>
                         {busy ? "Verifying..." : "Verify OTP"}
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={requestOtp}
+                        disabled={busy || otpCooldownLeft > 0}
+                        fullWidth
+                      >
+                        {otpCooldownLeft > 0 ? `Resend in ${otpCooldownLeft}s` : "Resend OTP"}
                       </Button>
                       <Button variant="outlined" color="inherit" onClick={() => setStep(1)} fullWidth>
                         Back
@@ -213,19 +234,5 @@ export default function Signup() {
         </Grid>
       </Grid>
     </Box>
-  );
-}
-
-function FlowPill({ label, active }: { label: string; active: boolean }) {
-  return (
-    <Chip
-      label={label}
-      sx={{
-        bgcolor: active ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)",
-        color: "common.white",
-        borderRadius: 999,
-        fontWeight: 700,
-      }}
-    />
   );
 }

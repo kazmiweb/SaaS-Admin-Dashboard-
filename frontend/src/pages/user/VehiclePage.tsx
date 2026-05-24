@@ -33,7 +33,7 @@ export default function VehiclePage() {
     islamabad: "Search with CNIC / Reg No / Engine No / Chasis No",
     sindh: "Search with CNIC / Reg No / Engine No / Chasis No",
     stolen: "Search with CNIC / Reg No / Engine No / Chasis No. This is stolen vehicle record.",
-    kpk: "Search with CNIC and Registration No",
+    kpk: "Search with CNIC / Reg No / Engine No / Chasis No",
     kashmir: "Search with CNIC and Registration No",
     balochistan: "Search with Registration No and District",
   };

@@ -159,6 +159,66 @@ async function main() {
     }
   });
 
+  const kpkApi = await prisma.apiConfig.upsert({
+    where: { id: "internal-kpk-dastak-mvrs" },
+    update: {
+      name: "KPK Excise Internal (Dastak MVRS)",
+      method: "GET",
+      baseUrl: "https://dastakapi.kp.gov.pk",
+      endpoint: "/api/public/mvrs/vehicles",
+      queryParam: "cnic",
+      description: "INTERNAL_ONLY: KPK MVRS via Dastak API. Auth from env (KPK_DASTAK_BEARER_TOKEN / KPK_DASTAK_API_KEY).",
+      authType: "NONE",
+      apiKeyHeader: null,
+      apiKeyValue: null,
+      bearerToken: null,
+      supportsCnic: true,
+      supportsEngine: true,
+      supportsChassis: true,
+      supportsReg: true,
+      creditsPerSearch: 1,
+      allowUser: true,
+      allowReseller: true,
+      allowAdmin: true,
+      status: true,
+      sampleQuery: "1610111488357",
+    },
+    create: {
+      id: "internal-kpk-dastak-mvrs",
+      name: "KPK Excise Internal (Dastak MVRS)",
+      method: "GET",
+      baseUrl: "https://dastakapi.kp.gov.pk",
+      endpoint: "/api/public/mvrs/vehicles",
+      queryParam: "cnic",
+      description: "INTERNAL_ONLY: KPK MVRS via Dastak API. Auth from env (KPK_DASTAK_BEARER_TOKEN / KPK_DASTAK_API_KEY).",
+      authType: "NONE",
+      apiKeyHeader: null,
+      apiKeyValue: null,
+      bearerToken: null,
+      supportsCnic: true,
+      supportsEngine: true,
+      supportsChassis: true,
+      supportsReg: true,
+      creditsPerSearch: 1,
+      allowUser: true,
+      allowReseller: true,
+      allowAdmin: true,
+      status: true,
+      sampleQuery: "1610111488357",
+    },
+  });
+
+  await prisma.serviceApi.deleteMany({
+    where: {
+      apiId: "seed-kpk-excise",
+    },
+  });
+  await prisma.apiConfig.deleteMany({
+    where: {
+      id: "seed-kpk-excise",
+    },
+  });
+
   const familyTreeApi = await prisma.apiConfig.upsert({
     where: { id: "seed-family-tree" },
     update: {},
@@ -264,6 +324,7 @@ async function main() {
       description: "Unified multi-database search across configured sources.",
       icon: "fa-magnifying-glass",
       type: "Search",
+      defaultCost: 2,
       apiLinks: [simApi.id, cmsPunjabPoliceApi.id, exciseApi.id, ajkApi.id],
     },
     {
@@ -271,13 +332,15 @@ async function main() {
       description: "Unified CNIC search using multiple APIs from one click.",
       icon: "fa-id-card",
       type: "UnifiedSearch",
-      apiLinks: [simApi.id, cmsPunjabPoliceApi.id, exciseApi.id, ajkApi.id],
+      defaultCost: 2,
+      apiLinks: [simApi.id, cmsPunjabPoliceApi.id, exciseApi.id, ajkApi.id, kpkApi.id],
     },
     {
       name: "Mobile Lookup",
       description: "Unified mobile number search using all phone-supported APIs.",
       icon: "fa-mobile-screen-button",
       type: "UnifiedSearch",
+      defaultCost: 2,
       apiLinks: [simApi.id, cmsPunjabPoliceApi.id],
     },
     {
@@ -285,6 +348,7 @@ async function main() {
       description: "Family tree graph search service. Dummy API linked for admin configuration.",
       icon: "fa-sitemap",
       type: "FamilyTree",
+      defaultCost: 30,
       apiLinks: [familyTreeApi.id],
     },
     {
@@ -292,6 +356,7 @@ async function main() {
       description: "Punjab vehicle lookup service with editable excise API mapping.",
       icon: "fa-car",
       type: "Vehicle",
+      defaultCost: 2,
       apiLinks: [exciseApi.id],
     },
     {
@@ -299,6 +364,7 @@ async function main() {
       description: "Islamabad vehicle lookup service with editable excise API mapping.",
       icon: "fa-car",
       type: "Vehicle",
+      defaultCost: 2,
       apiLinks: [islamabadApi.id],
     },
     {
@@ -306,6 +372,7 @@ async function main() {
       description: "Sindh vehicle lookup service with editable excise API mapping.",
       icon: "fa-car",
       type: "Vehicle",
+      defaultCost: 2,
       apiLinks: [exciseApi.id],
     },
     {
@@ -313,6 +380,7 @@ async function main() {
       description: "Balochistan vehicle lookup service with editable excise API mapping.",
       icon: "fa-car",
       type: "Vehicle",
+      defaultCost: 2,
       apiLinks: [exciseApi.id],
     },
     {
@@ -320,13 +388,15 @@ async function main() {
       description: "KPK vehicle lookup service with editable excise API mapping.",
       icon: "fa-car",
       type: "Vehicle",
-      apiLinks: [exciseApi.id],
+      defaultCost: 2,
+      apiLinks: [kpkApi.id],
     },
     {
       name: "Kashmir Excise",
       description: "Kashmir/AJK vehicle lookup service with editable excise API mapping.",
       icon: "fa-car",
       type: "Vehicle",
+      defaultCost: 2,
       apiLinks: [ajkApi.id],
     },
     {
@@ -334,6 +404,7 @@ async function main() {
       description: "Specific stolen vehicle verification service with editable API mapping.",
       icon: "fa-car-burst",
       type: "Vehicle",
+      defaultCost: 2,
       apiLinks: [exciseApi.id],
     },
   ];
@@ -346,7 +417,7 @@ async function main() {
         icon: serviceDef.icon,
         type: serviceDef.type,
         status: true,
-        defaultCost: 1,
+        defaultCost: serviceDef.defaultCost,
       },
       create: {
         name: serviceDef.name,
@@ -354,7 +425,7 @@ async function main() {
         icon: serviceDef.icon,
         type: serviceDef.type,
         status: true,
-        defaultCost: 1,
+        defaultCost: serviceDef.defaultCost,
       },
     });
 

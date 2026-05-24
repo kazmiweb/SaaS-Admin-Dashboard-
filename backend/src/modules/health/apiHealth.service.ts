@@ -2,6 +2,7 @@ import { HttpError } from "../../shared/http/errors.js";
 import { prisma } from "../../shared/prisma.js";
 import { redis } from "../../shared/redis.js";
 import { runApiCall } from "../search/runApiCall.js";
+import { isInternalApiConfig } from "../../shared/internalApis.js";
 
 const EVENT_LIMIT = Math.max(20, Number(process.env.API_HEALTH_EVENT_LIMIT ?? 50));
 const REDIS_TIMEOUT_MS = Math.max(25, Number(process.env.API_HEALTH_REDIS_TIMEOUT_MS ?? 150));
@@ -177,7 +178,7 @@ export async function listApiHealth() {
   });
 
   const items = await Promise.all(
-    apis.map(async (api) => {
+    apis.filter((api) => !isInternalApiConfig(api)).map(async (api) => {
       const events = await loadEvents(api.id);
       const summary = buildSummary(events);
       return {

@@ -19,10 +19,12 @@ import {
   Table,
   Tbody,
   Td,
+  Text,
   Th,
   Thead,
   Tr,
   useDisclosure,
+  useBreakpointValue,
   useToast,
 } from "@chakra-ui/react";
 import { useTheme as useMuiTheme } from "@mui/material";
@@ -42,6 +44,7 @@ type UserRow = {
 
 export default function ResellerUsers() {
   const muiTheme = useMuiTheme();
+  const isMobile = useBreakpointValue({ base: true, md: false }) ?? false;
   const ui = getDashboardUi(muiTheme.palette.mode);
   const toast = useToast();
   const [rows, setRows] = React.useState<UserRow[]>([]);
@@ -157,53 +160,89 @@ export default function ResellerUsers() {
         </HStack>
       </HStack>
 
-      <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="18px" overflow="hidden">
-        <Table size="sm">
-          <Thead>
-            <Tr>
-              <Th color={ui.text.secondary}>Name</Th>
-              <Th color={ui.text.secondary}>Email</Th>
-              <Th color={ui.text.secondary}>Coins</Th>
-              <Th color={ui.text.secondary}>Expiry</Th>
-              <Th color={ui.text.secondary}>Status</Th>
-              <Th color={ui.text.secondary} textAlign="right">Actions</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {rows.map((u) => (
-              <Tr key={u.id} _hover={{ bg: ui.surface.hover }}>
-                <Td>{u.name}</Td>
-                <Td>{u.email}</Td>
-                <Td>
+      {isMobile ? (
+        <Stack spacing={3}>
+          {rows.map((u) => (
+            <Box key={u.id} bg={ui.surface.card} border={`1px solid ${ui.surface.borderStrong}`} borderRadius="14px" p={3}>
+              <Stack spacing={2}>
+                <Box>
+                  <Text fontWeight="700">{u.name}</Text>
+                  <Text fontSize="sm" color={ui.text.secondary}>{u.email}</Text>
+                </Box>
+                <HStack justify="space-between" align="center" flexWrap="wrap">
                   <Badge colorScheme="yellow" borderRadius="999px" px={3} py={1}>
-                    {u.credits}
+                    Coins: {u.credits}
                   </Badge>
-                </Td>
-                <Td>{u.expireAt ? new Date(u.expireAt).toLocaleDateString() : "—"}</Td>
-                <Td>
                   <Badge colorScheme={u.status === "ACTIVE" ? "green" : "red"} borderRadius="999px" px={3} py={1}>
                     {u.status}
                   </Badge>
-                </Td>
-                <Td textAlign="right">
-                  <HStack justify="flex-end">
-                    <Button size="sm" borderRadius="999px" onClick={() => addCoins(u.id)}>
-                      Add Coins
-                    </Button>
-                    <Button size="sm" borderRadius="999px" variant="outline" onClick={() => resetDevice(u.id)}>
-                      Reset Device
-                    </Button>
-                    <Button size="sm" colorScheme="red" variant="outline" borderRadius="999px" onClick={() => deleteUser(u.id)}>
-                      Delete
-                    </Button>
-                  </HStack>
-                </Td>
+                </HStack>
+                <Text fontSize="sm" color={ui.text.secondary}>Expiry: {u.expireAt ? new Date(u.expireAt).toLocaleDateString() : "—"}</Text>
+                <HStack flexWrap="wrap">
+                  <Button size="sm" borderRadius="999px" onClick={() => addCoins(u.id)}>
+                    Add Coins
+                  </Button>
+                  <Button size="sm" borderRadius="999px" variant="outline" onClick={() => resetDevice(u.id)}>
+                    Reset Device
+                  </Button>
+                  <Button size="sm" colorScheme="red" variant="outline" borderRadius="999px" onClick={() => deleteUser(u.id)}>
+                    Delete
+                  </Button>
+                </HStack>
+              </Stack>
+            </Box>
+          ))}
+          {!rows.length ? <Box p={4} opacity={0.8}>No users created yet.</Box> : null}
+        </Stack>
+      ) : (
+        <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="18px" overflow="hidden">
+          <Table size="sm">
+            <Thead>
+              <Tr>
+                <Th color={ui.text.secondary}>Name</Th>
+                <Th color={ui.text.secondary}>Email</Th>
+                <Th color={ui.text.secondary}>Coins</Th>
+                <Th color={ui.text.secondary}>Expiry</Th>
+                <Th color={ui.text.secondary}>Status</Th>
+                <Th color={ui.text.secondary} textAlign="right">Actions</Th>
               </Tr>
-            ))}
-          </Tbody>
-        </Table>
-        {!rows.length ? <Box p={6} opacity={0.8}>No users created yet.</Box> : null}
-      </Box>
+            </Thead>
+            <Tbody>
+              {rows.map((u) => (
+                <Tr key={u.id} _hover={{ bg: ui.surface.hover }}>
+                  <Td>{u.name}</Td>
+                  <Td>{u.email}</Td>
+                  <Td>
+                    <Badge colorScheme="yellow" borderRadius="999px" px={3} py={1}>
+                      {u.credits}
+                    </Badge>
+                  </Td>
+                  <Td>{u.expireAt ? new Date(u.expireAt).toLocaleDateString() : "—"}</Td>
+                  <Td>
+                    <Badge colorScheme={u.status === "ACTIVE" ? "green" : "red"} borderRadius="999px" px={3} py={1}>
+                      {u.status}
+                    </Badge>
+                  </Td>
+                  <Td textAlign="right">
+                    <HStack justify="flex-end">
+                      <Button size="sm" borderRadius="999px" onClick={() => addCoins(u.id)}>
+                        Add Coins
+                      </Button>
+                      <Button size="sm" borderRadius="999px" variant="outline" onClick={() => resetDevice(u.id)}>
+                        Reset Device
+                      </Button>
+                      <Button size="sm" colorScheme="red" variant="outline" borderRadius="999px" onClick={() => deleteUser(u.id)}>
+                        Delete
+                      </Button>
+                    </HStack>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+          {!rows.length ? <Box p={6} opacity={0.8}>No users created yet.</Box> : null}
+        </Box>
+      )}
 
       <Modal isOpen={isOpen} onClose={onClose} isCentered size="lg">
         <ModalOverlay />

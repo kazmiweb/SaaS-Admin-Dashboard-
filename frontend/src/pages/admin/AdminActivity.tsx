@@ -13,13 +13,19 @@ import {
   TableHead,
   TableRow,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../app/api";
+import { getDashboardUi } from "../../dashboard/uiTokens";
 
 type TabKey = "activity" | "adminActions" | "securityEvents" | "apiErrors";
 
 export default function AdminActivity() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const ui = getDashboardUi(theme.palette.mode);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<TabKey>("activity");
@@ -87,48 +93,80 @@ export default function AdminActivity() {
 
       <Card>
         <CardContent>
-          <Box sx={{ overflowX: "auto" }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Time</TableCell>
-                  <TableCell>Type</TableCell>
-                  <TableCell>Action / Code</TableCell>
-                  <TableCell>Actor / Service</TableCell>
-                  <TableCell>Details</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {activeRows.map((item) => (
-                  <TableRow key={`${tab}-${item.id ?? item.createdAt}`} hover>
-                    <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={item.category ?? item.type ?? item.scope ?? "EVENT"}
-                        color={item.suspicious ? "warning" : "primary"}
-                        variant="outlined"
-                      />
-                    </TableCell>
-                    <TableCell>{item.action ?? item.reason ?? item.code ?? "-"}</TableCell>
-                    <TableCell>{item.actor?.email ?? item.user?.email ?? item.service ?? item.ip ?? "-"}</TableCell>
-                    <TableCell sx={{ maxWidth: 420 }}>
-                      <Typography variant="body2" color="text.secondary" noWrap>
+          {isMobile ? (
+            <Stack spacing={1.25}>
+              {activeRows.map((item) => (
+                <Card key={`${tab}-${item.id ?? item.createdAt}`} variant="outlined" sx={{ borderColor: ui.surface.borderStrong, backgroundColor: ui.surface.card }}>
+                  <CardContent sx={{ p: 1.5 }}>
+                    <Stack spacing={0.9}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+                        <Typography variant="body2" color="text.secondary">
+                          {item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={item.category ?? item.type ?? item.scope ?? "EVENT"}
+                          color={item.suspicious ? "warning" : "primary"}
+                          variant="outlined"
+                        />
+                      </Stack>
+                      <Typography fontWeight={700}>{item.action ?? item.reason ?? item.code ?? "-"}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.actor?.email ?? item.user?.email ?? item.service ?? item.ip ?? "-"}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>
                         {JSON.stringify(item.meta ?? item.message ?? item.error ?? { ip: item.ip ?? null, success: item.success ?? null })}
                       </Typography>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!activeRows.length ? (
+                    </Stack>
+                  </CardContent>
+                </Card>
+              ))}
+              {!activeRows.length ? <Typography color="text.secondary">No records found for this feed.</Typography> : null}
+            </Stack>
+          ) : (
+            <Box sx={{ overflowX: "auto" }}>
+              <Table size="small">
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={5}>
-                      <Typography color="text.secondary">No records found for this feed.</Typography>
-                    </TableCell>
+                    <TableCell>Time</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell>Action / Code</TableCell>
+                    <TableCell>Actor / Service</TableCell>
+                    <TableCell>Details</TableCell>
                   </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </Box>
+                </TableHead>
+                <TableBody>
+                  {activeRows.map((item) => (
+                    <TableRow key={`${tab}-${item.id ?? item.createdAt}`} hover>
+                      <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={item.category ?? item.type ?? item.scope ?? "EVENT"}
+                          color={item.suspicious ? "warning" : "primary"}
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>{item.action ?? item.reason ?? item.code ?? "-"}</TableCell>
+                      <TableCell>{item.actor?.email ?? item.user?.email ?? item.service ?? item.ip ?? "-"}</TableCell>
+                      <TableCell sx={{ maxWidth: 420 }}>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          {JSON.stringify(item.meta ?? item.message ?? item.error ?? { ip: item.ip ?? null, success: item.success ?? null })}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {!activeRows.length ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <Typography color="text.secondary">No records found for this feed.</Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </Box>
+          )}
         </CardContent>
       </Card>
     </Stack>

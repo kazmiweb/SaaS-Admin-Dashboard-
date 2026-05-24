@@ -30,6 +30,16 @@ function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isSimNoRecordMessage(value: string) {
+  const text = value.toLowerCase();
+  return (
+    text.includes("registered after 2022")
+    || text.includes("get data with payment")
+    || text.includes("click here")
+    || text.includes("followed correct format")
+  );
+}
+
 function isSimPlaceholder(value: unknown) {
   const normalized = normalizeText(value).toLowerCase();
   if (!normalized) return true;
@@ -38,7 +48,16 @@ function isSimPlaceholder(value: unknown) {
     || normalized === "n/a"
     || normalized === "na"
     || normalized.includes("data not recieved from nadra")
-    || normalized.includes("data not received from nadra");
+    || normalized.includes("data not received from nadra")
+    || isSimNoRecordMessage(normalized);
+}
+
+function normalizeSimMobile(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("03")) return digits;
+  if (digits.length === 12 && digits.startsWith("92")) return `0${digits.slice(2)}`;
+  if (digits.length === 13 && digits.startsWith("0092")) return `0${digits.slice(3)}`;
+  return null;
 }
 
 function isImageField(key: string, value: unknown) {
@@ -48,7 +67,9 @@ function isImageField(key: string, value: unknown) {
 }
 
 function isNegativeMessage(value: string) {
-  return /^(0|null|undefined|n\/a|na|none|no)$|no\s+(data|record|records|result|results|image|images)|not\s+found|failed\s+to\s+fetch|api\s+offline|server\s+error|invalid|unavailable|empty/i.test(value.trim());
+  const normalized = value.trim();
+  if (isSimNoRecordMessage(normalized)) return true;
+  return /^(0|null|undefined|n\/a|na|none|no)$|no\s+(data|record|records|result|results|image|images)|not\s+found|failed\s+to\s+fetch|api\s+offline|server\s+error|invalid|unavailable|empty/i.test(normalized);
 }
 
 function unwrapPayload(data: any): any {
@@ -91,12 +112,13 @@ function normalizeSimDatabaseRecord(record: any) {
   const cnic = normalizeText(rawCnic);
   const name = normalizeText(rawName);
   const address = normalizeText(rawAddress);
+  const normalizedMobile = isSimPlaceholder(mobile) ? null : normalizeSimMobile(mobile);
 
   return {
     ...rest,
     ...(name && !isSimPlaceholder(name) ? { name } : {}),
     ...(cnic ? { cnic } : {}),
-    ...(mobile ? { all_sim_numbers: [mobile] } : {}),
+    ...(normalizedMobile ? { all_sim_numbers: [normalizedMobile] } : {}),
     ...(address && !isSimPlaceholder(address) ? { address: [address] } : {}),
   };
 }
@@ -235,16 +257,60 @@ export function mergeResults(results: UnifiedResult[]) {
 export function collectImages(obj: any): string[] {
   const imgs: string[] = [];
   const looksLikeImageUrl = (value: string) =>
-    /^data:image/i.test(value) || /\\.(jpg|jpeg|png|webp|gif|bmp|svg)(\\?|$)/i.test(value);
-  const walk = (x: any) => {
+    /^data:image/i.test(value)
+    || /\\.(jpg|jpeg|png|webp|gif|bmp|svg)(\\?|$)/i.test(value)
+    || /(image|photo|avatar|profile|upload|attachment|e-?gadget)/i.test(value);
+  const looksLikeImageField = (key?: string) =>
+    !!key && /(image|img|photo|picture|avatar|profile|evidence|attachment|file|upload|imeiimage)/i.test(key);
+  const looksLikeBase64Blob = (value: string) =>
+    /^[A-Za-z0-9+/=]+$/.test(value) && value.length > 180;
+  const looksLikeRelativeImagePath = (value: string) =>
+    /^(\/|\.\/|uploads\/|upload\/|storage\/|images\/|files\/)/i.test(value);
+  const extractImgSrcFromHtml = (value: string) => {
+    const matches = value.matchAll(/<img[^>]*src=["']([^"']+)["']/gi);
+    const out: string[] = [];
+    for (const match of matches) {
+      if (match[1]) out.push(match[1]);
+    }
+    return out;
+  };
+  const normalizeImageString = (value: string) => value.replace(/\\\//g, "/").trim();
+  const walk = (x: any, parentKey?: string) => {
     if (x == null) return;
     if (typeof x === "string") {
-      const s=x.trim();
-      if (s.startsWith("data:image") || (s.match(/^https?:\/\//i) && looksLikeImageUrl(s))) imgs.push(s);
-    } else if (Array.isArray(x)) x.forEach(walk);
+      const s = normalizeImageString(x);
+      if (!s) return;
+
+      if (s.startsWith("data:image")) {
+        imgs.push(s);
+        return;
+      }
+
+      if (s.match(/^https?:\/\//i) && (looksLikeImageUrl(s) || looksLikeImageField(parentKey))) {
+        imgs.push(s);
+        return;
+      }
+
+      if (looksLikeImageField(parentKey) && looksLikeRelativeImagePath(s)) {
+        imgs.push(s);
+        return;
+      }
+
+      if (looksLikeImageField(parentKey) && looksLikeBase64Blob(s)) {
+        imgs.push(`data:image/jpeg;base64,${s}`);
+        return;
+      }
+
+      if (s.toLowerCase().includes("<img")) {
+        extractImgSrcFromHtml(s)
+          .map((src) => normalizeImageString(src))
+          .filter(Boolean)
+          .forEach((src) => imgs.push(src));
+      }
+    } else if (Array.isArray(x)) x.forEach((item) => walk(item, parentKey));
     else if (typeof x === "object") Object.entries(x).forEach(([key, value]) => {
       if (ignoredFieldKeys.has(normalizeKey(key))) return;
-      walk(value);
+      walk(value, key);
     });
   };
   walk(obj);

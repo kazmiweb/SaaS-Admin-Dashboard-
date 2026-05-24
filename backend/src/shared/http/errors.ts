@@ -6,10 +6,21 @@ import { getOrCreateRequestId } from "../observability/requestContext.js";
 export class HttpError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  details?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    options?: { details?: Record<string, unknown>; headers?: Record<string, string | number> }
+  ) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = options?.details;
+    this.headers = options?.headers
+      ? Object.fromEntries(Object.entries(options.headers).map(([key, value]) => [key, String(value)]))
+      : undefined;
   }
 }
 
@@ -33,6 +44,16 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   const status = err?.status ?? 500;
   const code = err?.code ?? "INTERNAL_ERROR";
   const message = status === 500 ? "Server error" : (err?.message ?? "Error");
+  const details = err?.details && typeof err.details === "object" ? err.details : undefined;
+
+  if (err?.headers && typeof err.headers === "object") {
+    for (const [key, value] of Object.entries(err.headers as Record<string, unknown>)) {
+      if (typeof value === "string" || typeof value === "number") {
+        res.setHeader(key, String(value));
+      }
+    }
+  }
+
   const logPayload = {
     scope: "http",
     event: "request-failed",
@@ -48,5 +69,5 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   } else {
     logWarn(logPayload);
   }
-  return res.status(status).json({ status: "error", code, message, requestId });
+  return res.status(status).json({ status: "error", code, message, requestId, ...(details ? { details } : {}) });
 }

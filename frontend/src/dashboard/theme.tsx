@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { CssBaseline } from "@mui/material";
 import { THEME_ID, ThemeProvider, createTheme } from "@mui/material/styles";
+import type {} from "@mui/x-data-grid/themeAugmentation";
 import { getDashboardUi } from "./uiTokens";
 
 type DashboardThemeContextValue = {
@@ -50,9 +51,10 @@ function getDesignTokens(mode: "light" | "dark") {
     },
     typography: {
       fontFamily: ["Plus Jakarta Sans", "Raleway", "Open Sans", "Roboto", "sans-serif"].join(","),
-      h4: { fontWeight: 800 },
-      h5: { fontWeight: 800 },
-      h6: { fontWeight: 800 },
+      h4: { fontWeight: 800, fontSize: "2rem", "@media (max-width:600px)": { fontSize: "1.45rem" } },
+      h5: { fontWeight: 800, fontSize: "1.45rem", "@media (max-width:600px)": { fontSize: "1.15rem" } },
+      h6: { fontWeight: 800, fontSize: "1.1rem", "@media (max-width:600px)": { fontSize: "0.96rem" } },
+      body2: { fontSize: "0.88rem", "@media (max-width:600px)": { fontSize: "0.8rem" } },
     },
     components: {
       MuiCssBaseline: {
@@ -104,6 +106,12 @@ function getDesignTokens(mode: "light" | "dark") {
             borderRadius: 14,
             textTransform: "none" as const,
             fontWeight: 700,
+            "@media (max-width:600px)": {
+              fontSize: "0.75rem",
+              minHeight: 34,
+              paddingLeft: 10,
+              paddingRight: 10,
+            },
           },
         },
       },
@@ -112,10 +120,55 @@ function getDesignTokens(mode: "light" | "dark") {
           root: {
             borderColor: ui.surface.border,
             color: ui.text.primary,
+            verticalAlign: "top",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            "@media (max-width:600px)": {
+              fontSize: "0.74rem",
+              paddingTop: 6,
+              paddingBottom: 6,
+            },
           },
           head: {
             color: ui.text.secondary,
             fontWeight: 700,
+            "@media (max-width:600px)": {
+              fontSize: "0.7rem",
+            },
+          },
+        },
+      },
+      MuiTable: {
+        styleOverrides: {
+          root: {
+            width: "100%",
+            tableLayout: "fixed",
+            "@media (min-width:900px)": {
+              tableLayout: "auto",
+            },
+          },
+        },
+      },
+      MuiDataGrid: {
+        styleOverrides: {
+          root: {
+            border: `1px solid ${ui.surface.borderStrong}`,
+            borderRadius: 16,
+            backgroundColor: ui.surface.card,
+            "--DataGrid-overlayHeight": "130px",
+          },
+          columnHeaders: {
+            backgroundColor: ui.surface.hover,
+            borderBottom: `1px solid ${ui.surface.borderStrong}`,
+          },
+          cell: {
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            lineHeight: 1.35,
+            alignItems: "center",
+          },
+          footerContainer: {
+            borderTop: `1px solid ${ui.surface.borderStrong}`,
           },
         },
       },
@@ -141,14 +194,25 @@ function getDesignTokens(mode: "light" | "dark") {
 
 export function DashboardThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setModeState] = useState<"light" | "dark">(() => {
-    const stored = typeof window !== "undefined" ? window.localStorage.getItem("dashboardMode") : null;
+    let stored: string | null = null;
+    if (typeof window !== "undefined") {
+      try {
+        stored = window.localStorage.getItem("dashboardMode");
+      } catch {
+        stored = null;
+      }
+    }
     return stored === "light" ? "light" : "dark";
   });
   const theme = useMemo(() => createTheme(getDesignTokens(mode)), [mode]);
   function setMode(next: "light" | "dark") {
     setModeState(next);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("dashboardMode", next);
+      try {
+        window.localStorage.setItem("dashboardMode", next);
+      } catch {
+        // ignore storage write failures
+      }
       window.dispatchEvent(new CustomEvent("dashboard-theme-change", { detail: next }));
     }
   }

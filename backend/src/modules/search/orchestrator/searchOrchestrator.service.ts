@@ -25,6 +25,49 @@ function normalizeServiceName(serviceName: string) {
   return serviceName.replace(/\+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+const FIXED_SERVICE_COST_BY_NAME: Record<string, number> = {
+  "cnic lookup": 2,
+  "mobile lookup": 2,
+  "mix family tree": 30,
+};
+
+function resolveServiceCost(service: { name: string; type?: string | null; defaultCost?: number | null }) {
+  const normalizedName = service.name.trim().toLowerCase();
+  if (normalizedName in FIXED_SERVICE_COST_BY_NAME) {
+    return FIXED_SERVICE_COST_BY_NAME[normalizedName];
+  }
+  if ((service.type ?? "").toLowerCase() === "vehicle") {
+    return 2;
+  }
+  const fallback = Number(service.defaultCost ?? 0);
+  return Number.isFinite(fallback) && fallback >= 0 ? fallback : 0;
+}
+
+function hasBillableResults(payload: any): boolean {
+  if (payload == null) return false;
+  if (Array.isArray(payload)) return payload.length > 0;
+  if (typeof payload !== "object") return false;
+
+  const numericHints = ["result_count", "count", "total", "total_results", "record_count", "matched", "hits", "found"];
+  for (const key of numericHints) {
+    const value = payload[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value > 0;
+  }
+
+  const arrayHints = ["results", "items", "data", "records", "aaData", "vehicles", "response"];
+  for (const key of arrayHints) {
+    const value = payload[key];
+    if (Array.isArray(value)) return value.length > 0;
+  }
+
+  const message = String(payload.message ?? payload.error ?? "").toLowerCase();
+  if (message.includes("no record") || message.includes("not found") || message.includes("no result")) return false;
+
+  const metaKeys = new Set(["status", "message", "error", "query", "query_sent", "detected_type", "source_format", "api", "ok"]);
+  const dataKeys = Object.keys(payload).filter((key) => !metaKeys.has(key));
+  return dataKeys.length > 0;
+}
+
 const inFlight = new Map<string, Promise<OrchestratedSearchResult>>();
 
 function supportsDetectedType(api: ApiConfig, detectedType: SearchDetectedType, normalizedQuery: string): boolean {
@@ -81,6 +124,10 @@ export async function runOrchestratedSearch(params: {
 
     if (user.status !== "ACTIVE") throw new HttpError(403, "SUSPENDED", "Account not active");
     if (user.expireAt && user.expireAt.getTime() < Date.now()) throw new HttpError(403, "EXPIRED", "Account expired");
+    const normalizedServiceName = normalizeServiceName(serviceName);
+    const service = await prisma.service.findFirst({
+      where: { name: { equals: normalizedServiceName, mode: "insensitive" } },
+    });
 
     if (user.credits <= 0 && auth.role === "USER") {
       const telegram = process.env.CONTACT_TELEGRAM ?? "";
@@ -89,11 +136,13 @@ export async function runOrchestratedSearch(params: {
       await prisma.searchHistory.create({
         data: {
           userId: user.id,
+          serviceId: service?.id ?? null,
           query,
           detectedType: classification.detectedType,
           status: "blocked",
           ip,
           cost: 0,
+          results: { serviceName: service?.name ?? normalizedServiceName },
         },
       });
 
@@ -101,7 +150,7 @@ export async function runOrchestratedSearch(params: {
         requestId,
         userId: auth.sub,
         ip,
-        service: serviceName,
+        service: service?.name ?? normalizedServiceName,
         originalQuery: query,
         normalizedQuery: classification.normalizedQuery,
         detectedType: classification.detectedType,
@@ -116,7 +165,7 @@ export async function runOrchestratedSearch(params: {
         severity: "warn",
         ip,
         userId: user.id,
-        service: serviceName,
+        service: service?.name ?? normalizedServiceName,
       });
       await markRealtimeSearchCompleted("orchestrated", false);
       realtimeFinished = true;
@@ -124,10 +173,6 @@ export async function runOrchestratedSearch(params: {
       throw new HttpError(402, "NO_CREDITS", `You have zero credit. Contact admin: ${telegram} | ${email}`);
     }
 
-    const normalizedServiceName = normalizeServiceName(serviceName);
-    const service = await prisma.service.findFirst({
-      where: { name: { equals: normalizedServiceName, mode: "insensitive" } },
-    });
     if (!service || !service.status) throw new HttpError(503, "SERVICE_OFFLINE", "Service disabled");
 
     const links = await prisma.serviceApi.findMany({
@@ -181,8 +226,8 @@ export async function runOrchestratedSearch(params: {
       throw new HttpError(404, "NO_APIS", "No APIs configured for this query type.");
     }
 
-    const totalCost = eligible.reduce((sum, item) => sum + item.api.creditsPerSearch, 0);
-    if (auth.role !== "ADMIN" && user.credits < totalCost) {
+    const serviceCost = resolveServiceCost(service);
+    if (auth.role !== "ADMIN" && user.credits < serviceCost) {
       logSearchFailure({
         requestId,
         userId: auth.sub,
@@ -193,12 +238,12 @@ export async function runOrchestratedSearch(params: {
         detectedType: classification.detectedType,
         totalLatencyMs: Date.now() - startedAt,
         errorCode: "INSUFFICIENT_CREDITS",
-        errorMessage: `Insufficient credits. Required: ${totalCost}, available: ${user.credits}`,
+        errorMessage: `Insufficient credits. Required: ${serviceCost}, available: ${user.credits}`,
       });
       await recordRealtimeError({
         scope: "search.orchestrated",
         code: "INSUFFICIENT_CREDITS",
-        message: `Insufficient credits. Required: ${totalCost}, available: ${user.credits}`,
+        message: `Insufficient credits. Required: ${serviceCost}, available: ${user.credits}`,
         severity: "warn",
         ip,
         userId: user.id,
@@ -206,7 +251,7 @@ export async function runOrchestratedSearch(params: {
       });
       await markRealtimeSearchCompleted("orchestrated", false);
       realtimeFinished = true;
-      throw new HttpError(402, "INSUFFICIENT_CREDITS", `Insufficient credits. Required: ${totalCost}, you have: ${user.credits}`);
+      throw new HttpError(402, "INSUFFICIENT_CREDITS", `Insufficient credits. Required: ${serviceCost}, you have: ${user.credits}`);
     }
 
     const maxConcurrency = Math.max(1, Math.min(12, Number(process.env.SEARCH_MAX_CONCURRENCY ?? 5)));
@@ -289,10 +334,11 @@ export async function runOrchestratedSearch(params: {
       const sourceDiagnostics = execution.diagnostics;
 
       const successCount = sourceResults.length;
+      const billableHits = sourceResults.filter((item) => hasBillableResults(item.data)).length;
       let charged = 0;
 
-      if (auth.role !== "ADMIN" && successCount > 0) {
-        charged = totalCost;
+      if (auth.role !== "ADMIN" && billableHits > 0) {
+        charged = serviceCost;
         await prisma.$transaction([
           prisma.user.update({ where: { id: user.id }, data: { credits: { decrement: charged } } }),
           prisma.creditLog.create({

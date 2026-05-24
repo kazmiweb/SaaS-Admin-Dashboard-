@@ -4,8 +4,40 @@ import { useAuth } from "./auth/useAuth";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import RoleRedirect from "./routes/RoleRedirect";
 
+const CHUNK_RELOAD_SESSION_KEY = "__elookup_chunk_reload_once__";
+
+function isChunkLoadError(error: unknown) {
+  const name = typeof error === "object" && error && "name" in error ? String((error as any).name) : "";
+  const message = typeof error === "object" && error && "message" in error ? String((error as any).message) : String(error ?? "");
+  const haystack = `${name} ${message}`.toLowerCase();
+  return (
+    haystack.includes("chunkloaderror") ||
+    haystack.includes("failed to fetch dynamically imported module") ||
+    haystack.includes("importing a module script failed") ||
+    haystack.includes("loading chunk")
+  );
+}
+
 function lazyRetry<T extends React.ComponentType<any>>(importer: () => Promise<{ default: T }>) {
-  return lazy(importer);
+  return lazy(async () => {
+    try {
+      const module = await importer();
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(CHUNK_RELOAD_SESSION_KEY);
+      }
+      return module;
+    } catch (error) {
+      if (typeof window !== "undefined" && isChunkLoadError(error)) {
+        const reloadedAlready = window.sessionStorage.getItem(CHUNK_RELOAD_SESSION_KEY) === "1";
+        if (!reloadedAlready) {
+          window.sessionStorage.setItem(CHUNK_RELOAD_SESSION_KEY, "1");
+          window.location.reload();
+          return new Promise<{ default: T }>(() => {});
+        }
+      }
+      throw error;
+    }
+  });
 }
 
 const Login = lazyRetry(() => import("../pages/Login"));
@@ -19,6 +51,7 @@ const AdminUsers = lazyRetry(() => import("../pages/admin/AdminUsers"));
 const AdminTransactions = lazyRetry(() => import("../pages/admin/AdminTransactions"));
 const AdminSecurity = lazyRetry(() => import("../pages/admin/AdminSecurity"));
 const AdminActivity = lazyRetry(() => import("../pages/admin/AdminActivity"));
+const AdminSearchHistory = lazyRetry(() => import("../pages/admin/AdminSearchHistory"));
 
 const IntelligenceCnic = lazyRetry(() => import("../pages/user/IntelligenceCnic"));
 const IntelligenceMobile = lazyRetry(() => import("../pages/user/IntelligenceMobile"));
@@ -28,7 +61,6 @@ const SearchPage = lazyRetry(() => import("../pages/user/SearchPage"));
 const UserProfile = lazyRetry(() => import("../pages/user/UserProfile"));
 const UserSearches = lazyRetry(() => import("../pages/user/UserSearches"));
 const UserTransactions = lazyRetry(() => import("../pages/user/UserTransactions"));
-const ChangePassword = lazyRetry(() => import("../pages/user/ChangePassword"));
 const ResellerUsers = lazyRetry(() => import("../pages/reseller/ResellerUsers"));
 const EmailsInbox = lazyRetry(() => import("../pages/shared/EmailsInbox"));
 
@@ -49,6 +81,7 @@ export default function App() {
               <Route path="api-management" element={<AdminApis />} />
               <Route path="user-management" element={<AdminUsers />} />
               <Route path="transactions" element={<AdminTransactions />} />
+              <Route path="search-history" element={<AdminSearchHistory />} />
               <Route path="security" element={<AdminSecurity />} />
               <Route path="profile" element={<UserProfile />} />
               <Route path="emails" element={<EmailsInbox />} />
@@ -71,7 +104,6 @@ export default function App() {
               <Route path="emails" element={<EmailsInbox />} />
               <Route path="settings/searches" element={<UserSearches />} />
               <Route path="settings/transactions" element={<UserTransactions />} />
-              <Route path="settings/change-password" element={<ChangePassword />} />
               <Route index element={<Navigate to="/user/dashboard" replace />} />
             </Route>
           </Route>
@@ -90,7 +122,6 @@ export default function App() {
               <Route path="users" element={<ResellerUsers />} />
               <Route path="settings/searches" element={<UserSearches />} />
               <Route path="settings/transactions" element={<UserTransactions />} />
-              <Route path="settings/change-password" element={<ChangePassword />} />
               <Route index element={<Navigate to="/reseller/dashboard" replace />} />
             </Route>
           </Route>

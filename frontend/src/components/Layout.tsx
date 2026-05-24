@@ -90,7 +90,7 @@ export function Layout({
       >
         <div className="p-4 border-b border-white/10">
           <div className="flex items-center justify-between gap-2">
-            {!collapsed && <div className="text-2xl font-extrabold tracking-tight">Elookup</div>}
+            {!collapsed && <div className="text-2xl font-extrabold tracking-tight">Trace Verisys</div>}
             <button
               type="button"
               onClick={() => setCollapsed((v) => !v)}
@@ -178,7 +178,7 @@ export function Layout({
       <main className={[collapsed ? "pl-[76px]" : "pl-[192px]", "transition-all duration-200 min-h-screen"].join(" ")}>
         <div className="sticky top-0 z-30 border-b border-white/10 bg-[#0b1320]/20 backdrop-blur-sm">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
-            <div className="text-lg font-extrabold">{title ?? (role === "ADMIN" ? "Admin Dashboard" : "Elookup")}</div>
+            <div className="text-lg font-extrabold">{title ?? (role === "ADMIN" ? "Super Admin Dashboard" : "Trace Verisys")}</div>
             {role !== "ADMIN" && (
               <div className="rounded-full border border-emerald-500/20 bg-emerald-500/15 px-4 py-1.5 text-sm font-extrabold text-emerald-200">
                 {me?.credits ?? 0}

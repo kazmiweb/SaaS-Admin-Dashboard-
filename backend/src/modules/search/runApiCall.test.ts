@@ -48,6 +48,10 @@ function makeApiConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.KPK_DASTAK_BEARER_TOKEN;
+  delete process.env.KPK_DASTAK_API_KEY;
+  delete process.env.KPK_DASTAK_UUID;
+  delete process.env.KPK_DASTAK_IF_MODIFIED_SINCE;
 });
 
 describe("runApiCall", () => {
@@ -250,6 +254,129 @@ describe("runApiCall", () => {
       }),
     });
     expect(result.data).toEqual({ data: { reg_no: "ABC-123" } });
+  });
+
+  it("calls KPK Dastak MVRS endpoint with CNIC query and auth headers", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          result_count: 1,
+          results: [{ registration_no: "B-2032", cnic: "1610111488357" }],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    process.env.KPK_DASTAK_BEARER_TOKEN = "test-bearer-token";
+    process.env.KPK_DASTAK_API_KEY = "test-api-key";
+    process.env.KPK_DASTAK_UUID = "uuid-1234";
+
+    const result = await runApiCall(
+      makeApiConfig({
+        method: "GET",
+        name: "KPK Excise Internal",
+        baseUrl: "https://dastakapi.kp.gov.pk",
+        endpoint: "/api/public/mvrs/vehicles",
+        queryParam: "cnic",
+        supportsCnic: true,
+        supportsReg: true,
+        supportsEngine: true,
+        supportsChassis: true,
+      }),
+      "1610111488357",
+      { requestParams: { _detectedType: "CNIC" } },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://dastakapi.kp.gov.pk/api/public/mvrs/vehicles?cnic=1610111488357");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "GET",
+      headers: expect.objectContaining({
+        authorization: "Bearer test-bearer-token",
+        "x-api-key": "test-api-key",
+        uuid: "uuid-1234",
+      }),
+    });
+    expect(result.data).toEqual({
+      status: "success",
+      result_count: 1,
+      results: [
+        {
+          registration_no: "B-2032",
+          cnic: "1610111488357",
+        },
+      ],
+    });
+  });
+
+  it("tries alternate params for KPK Dastak when the first param is rejected", async () => {
+    process.env.KPK_DASTAK_BEARER_TOKEN = "test-bearer-token";
+    process.env.KPK_DASTAK_API_KEY = "test-api-key";
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: "The cnic field is required.",
+          }),
+          { status: 422, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "success",
+            result_count: 1,
+            results: [{ engine_no: "1N0091908" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    const result = await runApiCall(
+      makeApiConfig({
+        method: "GET",
+        name: "KPK Excise Internal",
+        baseUrl: "https://dastakapi.kp.gov.pk",
+        endpoint: "/api/public/mvrs/vehicles",
+        queryParam: "cnic",
+        supportsEngine: true,
+      }),
+      "1N0091908",
+      { requestParams: { _detectedType: "ENGINE" } },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://dastakapi.kp.gov.pk/api/public/mvrs/vehicles?engine_no=1N0091908");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://dastakapi.kp.gov.pk/api/public/mvrs/vehicles?engine=1N0091908");
+    expect(result.data).toEqual({
+      status: "success",
+      result_count: 1,
+      results: [{ engine_no: "1N0091908" }],
+    });
+  });
+
+  it("returns clear auth error when KPK Dastak env credentials are missing", async () => {
+    await expect(
+      runApiCall(
+        makeApiConfig({
+          method: "GET",
+          name: "KPK Excise Internal",
+          baseUrl: "https://dastakapi.kp.gov.pk",
+          endpoint: "/api/public/mvrs/vehicles",
+          queryParam: "cnic",
+          supportsCnic: true,
+        }),
+        "1610111488357",
+        { requestParams: { _detectedType: "CNIC" } },
+      ),
+    ).rejects.toMatchObject({
+      code: "API_AUTH_REQUIRED",
+    });
   });
 
   it("parses CMS Punjab Police HTML tables and strips the action column", async () => {

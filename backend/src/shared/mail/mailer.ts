@@ -1,21 +1,42 @@
 import nodemailer from "nodemailer";
+import { logWarn } from "../observability/logger.js";
+
+const SMTP_VERIFY_RETRY_MS = Math.max(5_000, Number(process.env.SMTP_VERIFY_RETRY_MS ?? 30_000));
+const SMTP_VERIFY_TIMEOUT_MS = Math.max(3_000, Number(process.env.SMTP_VERIFY_TIMEOUT_MS ?? 10_000));
+const SMTP_TEST_CONNECTION = (process.env.SMTP_TEST_CONNECTION ?? "true") !== "false";
+
+function resolveSmtpPort() {
+  const raw = Number(process.env.SMTP_PORT ?? 587);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return 587;
+}
+
+function resolveSmtpHost() {
+  return (process.env.SMTP_HOST ?? "").trim();
+}
+
+function resolveSmtpAuth() {
+  const user = (process.env.SMTP_USER ?? "").trim();
+  if (!user) return undefined;
+  return { user, pass: process.env.SMTP_PASS };
+}
 
 export const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT ?? 587),
+  host: resolveSmtpHost() || undefined,
+  port: resolveSmtpPort(),
   secure: (process.env.SMTP_SECURE ?? "false") === "true",
-  auth: (process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined),
+  auth: resolveSmtpAuth(),
 });
 
-const hasSmtpConfig = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT);
-let smtpVerifiedPromise: Promise<boolean> | null = null;
+let smtpStatusCache: { ready: boolean; checkedAt: number } | null = null;
+let smtpVerifyInFlight: Promise<boolean> | null = null;
 
 function isProduction() {
   return (process.env.NODE_ENV ?? "development") === "production";
 }
 
 function resolveMailFrom() {
-  return process.env.MAIL_FROM ?? "Elookup <no-reply@elookup.local>";
+  return process.env.MAIL_FROM ?? "Trace Verisys <no-reply@traceverisys.local>";
 }
 
 function resolveSupportRecipients() {
@@ -27,11 +48,40 @@ function resolveSupportRecipients() {
 }
 
 async function ensureSmtpReady() {
-  if (!hasSmtpConfig) return false;
-  if (!smtpVerifiedPromise) {
-    smtpVerifiedPromise = transporter.verify().then(() => true).catch(() => false);
+  const host = resolveSmtpHost();
+  if (!host) return false;
+  if (!SMTP_TEST_CONNECTION) return true;
+
+  const now = Date.now();
+  if (smtpStatusCache && now - smtpStatusCache.checkedAt < SMTP_VERIFY_RETRY_MS) {
+    return smtpStatusCache.ready;
   }
-  return smtpVerifiedPromise;
+
+  if (!smtpVerifyInFlight) {
+    smtpVerifyInFlight = Promise.race<boolean>([
+      transporter.verify().then(() => true),
+      new Promise<boolean>((resolve) => {
+        setTimeout(() => resolve(false), SMTP_VERIFY_TIMEOUT_MS);
+      }),
+    ])
+      .catch((error) => {
+        logWarn({
+          scope: "mail",
+          event: "smtp-verify-failed",
+          host,
+          port: resolveSmtpPort(),
+          error,
+        });
+        return false;
+      })
+      .finally(() => {
+        smtpVerifyInFlight = null;
+      });
+  }
+
+  const ready = await smtpVerifyInFlight;
+  smtpStatusCache = { ready, checkedAt: Date.now() };
+  return ready;
 }
 
 async function sendWithFallback(payload: nodemailer.SendMailOptions & { devHint?: string }) {
@@ -50,19 +100,23 @@ async function sendWithFallback(payload: nodemailer.SendMailOptions & { devHint?
     return;
   }
 
-  throw new Error("SMTP transport is not configured or not reachable");
+  const host = resolveSmtpHost();
+  throw new Error(
+    `SMTP transport is not configured or reachable. Check SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS (host=${host || "missing"}).`
+  );
 }
 
-export async function sendOtpEmail(to: string, otp: string) {
+export async function sendOtpEmail(to: string, otp: string, expirySeconds = 600) {
+  const expiryMinutes = Math.max(1, Math.ceil(expirySeconds / 60));
   const from = resolveMailFrom();
-  const subject = "Your Elookup OTP Code";
-  const text = `Your OTP is ${otp}. It expires in 10 minutes. If you did not request this, ignore.`;
+  const subject = "Your Trace Verisys OTP Code";
+  const text = `Your OTP is ${otp}. It expires in ${expiryMinutes} minutes. If you did not request this, ignore.`;
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:16px">
-      <h2 style="margin:0 0 10px 0;color:#0f172a">Elookup Verification Code</h2>
+      <h2 style="margin:0 0 10px 0;color:#0f172a">Trace Verisys Verification Code</h2>
       <p style="color:#334155">Use this OTP to continue:</p>
       <div style="font-size:28px;font-weight:800;letter-spacing:6px;padding:12px 16px;border-radius:12px;background:#0ea5e9;color:#fff;display:inline-block">${otp}</div>
-      <p style="color:#64748b;margin-top:14px">Expires in <b>10 minutes</b>.</p>
+      <p style="color:#64748b;margin-top:14px">Expires in <b>${expiryMinutes} minutes</b>.</p>
     </div>`;
 
   await sendWithFallback({
@@ -113,7 +167,7 @@ export async function sendSupportTicketEmail(input: {
   await sendWithFallback({
     from,
     to: recipients,
-    subject: `Elookup Support • ${input.ticketToken} • ${input.subject}`,
+    subject: `Trace Verisys Support • ${input.ticketToken} • ${input.subject}`,
     text,
     html,
     devHint: `[DEV][SUPPORT_MAIL] ${input.ticketToken} ${input.subject}`,

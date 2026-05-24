@@ -73,6 +73,8 @@ model User {
   expireAt             DateTime?
   acceptedDisclaimerAt DateTime?
   theme                String    @default("light")
+  twoFactorEnabled     Boolean   @default(false)
+  profileImageData     String?
   billingType          String    @default("PAID") // PAID|FREE|DEMO
   revenueExcluded      Boolean   @default(false)
   monthlyPackageCoins  Int       @default(0)

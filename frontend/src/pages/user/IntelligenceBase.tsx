@@ -17,8 +17,53 @@ import { api } from "../../app/api";
 import { issueSearchToken } from "../../app/searchToken";
 import { getDashboardUi } from "../../dashboard/uiTokens";
 import ResultsView from "./components/ResultsView";
+import { downloadClientPdf } from "../../utils/export";
+import { isRenderableResult, normalizeResultData } from "./components/merge";
 
 type UnifiedResult = { apiId: string; apiName: string; ok: boolean; data?: any; error?: string };
+
+const MAX_EXPORT_DEPTH = 4;
+const MAX_EXPORT_ARRAY = 40;
+const MAX_EXPORT_OBJECT_KEYS = 80;
+const MAX_EXPORT_TEXT = 600;
+
+function sanitizeForPdfExport(input: unknown, depth = 0): unknown {
+  if (depth > MAX_EXPORT_DEPTH) return undefined;
+  if (input == null) return input;
+
+  if (typeof input === "string") {
+    const text = input.trim();
+    if (!text) return "";
+    if (/^data:image\//i.test(text)) return undefined;
+    if (text.length > MAX_EXPORT_TEXT && /^[A-Za-z0-9+/=\s]+$/.test(text)) return undefined;
+    return text.length > MAX_EXPORT_TEXT ? `${text.slice(0, MAX_EXPORT_TEXT)}...` : text;
+  }
+
+  if (typeof input === "number" || typeof input === "boolean") return input;
+
+  if (Array.isArray(input)) {
+    return input
+      .slice(0, MAX_EXPORT_ARRAY)
+      .map((item) => sanitizeForPdfExport(item, depth + 1))
+      .filter((item) => item !== undefined);
+  }
+
+  if (typeof input === "object") {
+    const out: Record<string, unknown> = {};
+    let used = 0;
+    for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+      if (/image|photo|picture|avatar|pic|img/i.test(key)) continue;
+      const next = sanitizeForPdfExport(value, depth + 1);
+      if (next === undefined) continue;
+      out[key] = next;
+      used += 1;
+      if (used >= MAX_EXPORT_OBJECT_KEYS) break;
+    }
+    return out;
+  }
+
+  return undefined;
+}
 
 export default function IntelligenceBase({
   title,
@@ -54,7 +99,6 @@ export default function IntelligenceBase({
   const toast = useToast();
   const [value, setValue] = React.useState("");
   const [loading, setLoading] = React.useState(false);
-  const [detectedType, setDetectedType] = React.useState<string>("");
   const [querySent, setQuerySent] = React.useState<string>("");
   const [results, setResults] = React.useState<UnifiedResult[]>([]);
   const [blocked, setBlocked] = React.useState<string | null>(null);
@@ -79,7 +123,6 @@ export default function IntelligenceBase({
         },
         headers: { "x-search-token": searchToken },
       });
-      setDetectedType(res.data.detectedType ?? "");
       setQuerySent(res.data.querySent ?? q);
       setResults(res.data.results ?? []);
       toast({ status: "success", title: "Search complete", position: "top" });
@@ -97,13 +140,30 @@ export default function IntelligenceBase({
 
   async function exportPdf() {
     const q = querySent || (normalizeForBackend ? normalizeForBackend(value) : value.trim());
-    const res = await api.post("/export/pdf", { title: "Elookup Report", query: q, detectedType: detectedType || "CUSTOM", results }, { responseType: "blob" });
-    const url = window.URL.createObjectURL(res.data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${q || "report"}.pdf`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    const printableResults = results
+      .filter(isRenderableResult)
+      .map((item) => ({
+        apiId: item.apiId,
+        apiName: item.apiName,
+        ok: item.ok,
+        data: sanitizeForPdfExport(normalizeResultData(item.data)),
+      }));
+    downloadClientPdf({
+      filename: `${q || "report"}.pdf`,
+      title: "Trace Verisys Intelligence Report",
+      subtitle: `Query: ${q}`,
+      sections: printableResults.map((item) => ({
+        heading: item.apiName,
+        rows: Array.isArray(item.data) ? item.data : [item.data],
+      })),
+    });
+  }
+
+  function clearSearch() {
+    setValue("");
+    setQuerySent("");
+    setResults([]);
+    setBlocked(null);
   }
 
   return (
@@ -146,7 +206,7 @@ export default function IntelligenceBase({
             <Button colorScheme="blue" borderRadius="999px" size="lg" onClick={run} isLoading={loading}>
               {searchLabel}
             </Button>
-            <Button variant="outline" borderRadius="999px" size="lg" onClick={() => setValue("")}>
+            <Button variant="outline" colorScheme="red" borderRadius="999px" size="lg" onClick={clearSearch} isDisabled={loading}>
               {clearLabel}
             </Button>
             {resultsActions === "single-pdf" && results.length ? (
@@ -177,6 +237,7 @@ export default function IntelligenceBase({
               results={results}
               onExportPdf={exportPdf}
               actionsVariant={resultsActions}
+              serviceName={serviceName}
             />
           ) : null}
         </Stack>

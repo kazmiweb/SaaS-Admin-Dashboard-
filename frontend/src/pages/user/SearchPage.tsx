@@ -54,20 +54,24 @@ export default function SearchPage() {
 
   async function downloadPdf() {
     if (!resp) return;
-    const r = await api.post("/export/pdf", {
-      title: "Elookup Database System Report",
-      query: resp.querySent,
-      detectedType: resp.detectedType,
-      results: resp
-    }, { responseType: "blob" });
+    try {
+      const r = await api.post("/export/pdf", {
+        title: "Trace Verisys Database System Report",
+        query: resp.querySent,
+        detectedType: resp.detectedType,
+        results: resp
+      }, { responseType: "blob" });
 
-    const blob = new Blob([r.data], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${resp.querySent || "elookup"}-${Date.now()}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+      const blob = new Blob([r.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${resp.querySent || "trace-verisys"}-${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setErr(e?.response?.data?.message ?? e?.message ?? "PDF export failed");
+    }
   }
 
   return (
@@ -176,8 +180,8 @@ export default function SearchPage() {
                   <button
                     onClick={() =>
                       downloadClientPdf({
-                        filename: `${resp.querySent || "elookup"}-client.pdf`,
-                        title: "Elookup Intelligence Report",
+                        filename: `${resp.querySent || "trace-verisys"}-client.pdf`,
+                        title: "Trace Verisys Intelligence Report",
                         subtitle: `Query: ${resp.querySent} • Detected: ${resp.detectedType}`,
                         sections: [{ heading: "API Results", rows: visibleResults }],
                         rawJson: { ...resp, results: visibleResults },
@@ -188,7 +192,7 @@ export default function SearchPage() {
                     📄 Client PDF
                   </button>
                   <button
-                    onClick={() => downloadCsv(`${resp.querySent || "elookup"}-results.csv`, visibleResults)}
+                    onClick={() => downloadCsv(`${resp.querySent || "trace-verisys"}-results.csv`, visibleResults)}
                     className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-extrabold"
                   >
                     ⬇️ CSV
@@ -211,7 +215,7 @@ export default function SearchPage() {
           <div className="mt-10 rounded-2xl bg-black/20 border border-white/10 p-5 text-slate-200">
             <div className="text-lg font-extrabold text-blue-200">About This Portal</div>
             <div className="text-sm text-slate-300 mt-2">
-              Secure access to Elookup Database records. Exact-match search only. 1 coin per search (per API cost configurable).
+              Secure access to Trace Verisys database records. Exact-match search only. 1 coin per search (per API cost configurable).
             </div>
           </div>
         </div>

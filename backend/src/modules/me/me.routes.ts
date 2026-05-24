@@ -21,7 +21,7 @@ function buildDashboardSearchItems(role: DashboardRole) {
       { label: "Transactions", description: "Revenue and transaction records", to: "/admin/transactions" },
       { label: "Security", description: "Authentication and IP controls", to: "/admin/security" },
       { label: "Profile", description: "Account settings and theme", to: "/admin/profile" },
-      { label: "Emails", description: "Inbox and reply workspace", to: "/admin/emails" },
+      { label: "Support", description: "Inbox and reply workspace", to: "/admin/emails" },
       { label: "Activity Logs", description: "Recent admin actions", to: "/admin/activity" },
     ];
   }
@@ -36,14 +36,13 @@ function buildDashboardSearchItems(role: DashboardRole) {
     { label: "Islamabad Excise", description: "Vehicle search", to: `${base}/vehicle/islamabad` },
     { label: "Sindh Excise", description: "Vehicle search", to: `${base}/vehicle/sindh` },
     { label: "Balochistan Excise", description: "Vehicle search", to: `${base}/vehicle/balochistan` },
-    { label: "KPK Excise", description: "Vehicle search", to: `${base}/vehicle/kpk` },
+    { label: "KPK Excise (Vehicles)", description: "Vehicle search", to: `${base}/vehicle/kpk` },
     { label: "Kashmir Excise", description: "Vehicle search", to: `${base}/vehicle/kashmir` },
     { label: "Stolen Vehicle Record", description: "Check stolen vehicle data", to: `${base}/vehicle/stolen` },
     { label: "Profile", description: "Account settings and theme", to: `${base}/profile` },
-    { label: "Contact Admin", description: "Support inbox and live chat", to: `${base}/emails` },
+    { label: "Live Support", description: "Support inbox and live chat", to: `${base}/emails` },
     { label: "My Searches", description: "Search history", to: `${base}/settings/searches` },
     { label: "Transactions", description: "Coins and billing history", to: `${base}/settings/transactions` },
-    { label: "Reset Password", description: "Update account password", to: `${base}/settings/change-password` },
   ];
 
   if (role === "RESELLER") {
@@ -59,11 +58,37 @@ function parseTake(input: unknown, fallback: number, max: number) {
   return Math.min(Math.floor(raw), max);
 }
 
+function parsePage(input: unknown, fallback = 1) {
+  const raw = Number(input);
+  if (!Number.isFinite(raw) || raw <= 0) return fallback;
+  return Math.floor(raw);
+}
+
+const PROFILE_IMAGE_MAX_CHARS = Math.max(60_000, Number(process.env.PROFILE_IMAGE_MAX_CHARS ?? 450_000));
+const PROFILE_IMAGE_DATA_URL_PATTERN = /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
+function normalizeEmail(input: string) {
+  return input.trim().toLowerCase();
+}
+
 meRouter.get("/", requireAuth, async (req: Request, res: Response) => {
   const auth = (req as any).auth as { sub: string };
   const meRaw = await prisma.user.findUnique({
     where: { id: auth.sub },
-    select: { id: true, email: true, name: true, role: true, credits: true, expireAt: true, acceptedDisclaimerAt: true, theme: true, status: true, createdAt: true }
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      credits: true,
+      expireAt: true,
+      acceptedDisclaimerAt: true,
+      theme: true,
+      status: true,
+      createdAt: true,
+      twoFactorEnabled: true,
+      profileImageData: true,
+    }
   });
   if (!meRaw) throw new HttpError(404, "NOT_FOUND", "User not found");
   await syncExpiredCredits({ id: meRaw.id, expireAt: meRaw.expireAt, credits: meRaw.credits } as any);
@@ -84,6 +109,61 @@ meRouter.post("/theme", requireAuth, async (req: Request, res: Response) => {
   const body = z.object({ theme: z.enum(["light","dark"]) }).parse(req.body);
   await prisma.user.update({ where: { id: auth.sub }, data: { theme: body.theme } });
   res.json({ status: "success" });
+});
+
+meRouter.post("/profile-image", requireAuth, async (req: Request, res: Response) => {
+  const auth = (req as any).auth as { sub: string };
+  const body = z
+    .object({
+      imageData: z
+        .string()
+        .trim()
+        .max(PROFILE_IMAGE_MAX_CHARS)
+        .regex(PROFILE_IMAGE_DATA_URL_PATTERN, "Only png/jpeg/webp/gif base64 image is allowed."),
+    })
+    .parse(req.body ?? {});
+
+  await prisma.user.update({
+    where: { id: auth.sub },
+    data: { profileImageData: body.imageData },
+  });
+
+  res.json({ status: "success", message: "Profile image updated." });
+});
+
+meRouter.delete("/profile-image", requireAuth, async (req: Request, res: Response) => {
+  const auth = (req as any).auth as { sub: string };
+  await prisma.user.update({
+    where: { id: auth.sub },
+    data: { profileImageData: null },
+  });
+  res.json({ status: "success", message: "Profile image removed." });
+});
+
+meRouter.post("/2fa", requireAuth, async (req: Request, res: Response) => {
+  const auth = (req as any).auth as { sub: string };
+  const body = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+
+  await prisma.user.update({
+    where: { id: auth.sub },
+    data: { twoFactorEnabled: body.enabled },
+  });
+
+  if (!body.enabled) {
+    await prisma.oTPVerification.updateMany({
+      where: {
+        usedAt: null,
+        purpose: { startsWith: `LOGIN_2FA:${auth.sub}` },
+      },
+      data: { usedAt: new Date() },
+    });
+  }
+
+  res.json({
+    status: "success",
+    message: body.enabled ? "2FA enabled." : "2FA disabled.",
+    enabled: body.enabled,
+  });
 });
 
 meRouter.get("/search-token", requireAuth, async (req: Request, res: Response) => {
@@ -112,6 +192,34 @@ meRouter.post("/change-password", requireAuth, async (req: Request, res: Respons
   const passwordHash = await bcrypt.hash(body.newPassword, 12);
   await prisma.user.update({ where: { id: auth.sub }, data: { passwordHash } });
   res.json({ status: "success" });
+});
+
+meRouter.post("/email-update", requireAuth, async (req: Request, res: Response) => {
+  const auth = (req as any).auth as { sub: string };
+  const body = z.object({
+    newEmail: z.string().trim().email().max(255),
+    currentPassword: z.string().min(1).max(128),
+  }).parse(req.body ?? {});
+  const newEmail = normalizeEmail(body.newEmail);
+
+  const me = await prisma.user.findUnique({
+    where: { id: auth.sub },
+    select: { id: true, email: true, passwordHash: true },
+  });
+  if (!me) throw new HttpError(404, "NOT_FOUND", "User not found");
+  if (normalizeEmail(me.email) === newEmail) throw new HttpError(400, "BAD_REQUEST", "New email is same as current email.");
+  const passwordOk = await bcrypt.compare(body.currentPassword, me.passwordHash);
+  if (!passwordOk) throw new HttpError(400, "BAD_PASSWORD", "Current password incorrect");
+
+  const exists = await prisma.user.findUnique({ where: { email: newEmail }, select: { id: true } });
+  if (exists && exists.id !== auth.sub) throw new HttpError(409, "EMAIL_EXISTS", "Email already in use.");
+
+  await prisma.user.update({
+    where: { id: auth.sub },
+    data: { email: newEmail },
+  });
+
+  res.json({ status: "success", message: "Email updated." });
 });
 
 // ===== Services list for sidebar (USER/RESELLER) =====
@@ -166,21 +274,35 @@ meRouter.get("/services", requireAuth, async (req, res) => {
 meRouter.get("/search-history", requireAuth, async (req: Request, res: Response) => {
   const auth = (req as any).auth as { sub: string };
   const take = parseTake(req.query.limit, 10, 100);
-  const rows = await prisma.searchHistory.findMany({
-    where: { userId: auth.sub },
-    orderBy: { createdAt: "desc" },
-    take,
-    select: { id: true, query: true, detectedType: true, status: true, cost: true, createdAt: true, service: { select: { name: true } } }
+  const page = parsePage(req.query.page, 1);
+  const skip = (page - 1) * take;
+
+  const [rows, total] = await Promise.all([
+    prisma.searchHistory.findMany({
+      where: { userId: auth.sub },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      select: { id: true, query: true, detectedType: true, status: true, cost: true, createdAt: true, service: { select: { name: true } } }
+    }),
+    prisma.searchHistory.count({ where: { userId: auth.sub } }),
+  ]);
+
+  res.json({
+    status: "success",
+    page,
+    limit: take,
+    total,
+    items: rows.map(r => ({
+      id: r.id,
+      query: r.query,
+      service: r.service?.name ?? "—",
+      detectedType: r.detectedType,
+      status: r.status,
+      cost: r.cost,
+      createdAt: r.createdAt
+    })),
   });
-  res.json({ status: "success", items: rows.map(r => ({
-    id: r.id,
-    query: r.query,
-    service: r.service?.name ?? "—",
-    detectedType: r.detectedType,
-    status: r.status,
-    cost: r.cost,
-    createdAt: r.createdAt
-  })) });
 });
 
 meRouter.get("/transactions", requireAuth, async (req: Request, res: Response) => {

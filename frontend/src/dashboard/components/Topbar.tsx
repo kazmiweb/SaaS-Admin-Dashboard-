@@ -1,10 +1,12 @@
 import TelegramIcon from "@mui/icons-material/Telegram";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
+import MoreVertRoundedIcon from "@mui/icons-material/MoreVertRounded";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import NotificationsOutlinedIcon from "@mui/icons-material/NotificationsOutlined";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
+import SupportAgentRoundedIcon from "@mui/icons-material/SupportAgentRounded";
 import {
   AppBar,
   Badge,
@@ -19,6 +21,7 @@ import {
   TextField,
   Toolbar,
   Typography,
+  useMediaQuery,
   useTheme,
 } from "@mui/material";
 import React from "react";
@@ -35,13 +38,15 @@ type TopbarProps = {
 
 export default function Topbar({ title, onToggleSidebar }: TopbarProps) {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const ui = getDashboardUi(theme.palette.mode);
   const { mode, toggleMode } = useDashboardTheme();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
   const telegramUrl = import.meta.env.VITE_TELEGRAM_URL || "https://t.me/elookup_support";
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const [searchAnchorEl, setSearchAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [mobileActionsAnchorEl, setMobileActionsAnchorEl] = React.useState<null | HTMLElement>(null);
   const [notifications, setNotifications] = React.useState<any[]>([]);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [searchQuery, setSearchQuery] = React.useState("");
@@ -112,6 +117,14 @@ export default function Topbar({ title, onToggleSidebar }: TopbarProps) {
     }
   }
 
+  function openMobileActions(event: React.MouseEvent<HTMLElement>) {
+    setMobileActionsAnchorEl(event.currentTarget);
+  }
+
+  function closeMobileActions() {
+    setMobileActionsAnchorEl(null);
+  }
+
   async function loadDashboardSearch(query: string) {
     try {
       setSearchLoading(true);
@@ -155,7 +168,7 @@ export default function Topbar({ title, onToggleSidebar }: TopbarProps) {
         color: ui.text.primary,
       }}
     >
-      <Toolbar sx={{ gap: { xs: 0.55, sm: 1.25 }, px: { xs: 0.9, sm: 2 }, minHeight: { xs: 64, sm: 78 } }}>
+      <Toolbar sx={{ gap: { xs: 0.45, sm: 1.25 }, px: { xs: 0.75, sm: 2 }, minHeight: { xs: 60, sm: 78 } }}>
         <IconButton
           onClick={onToggleSidebar}
           color="inherit"
@@ -177,15 +190,23 @@ export default function Topbar({ title, onToggleSidebar }: TopbarProps) {
             variant="h5"
             title={title}
             sx={{
-              fontFamily: '"Raleway", "Plus Jakarta Sans", sans-serif',
-              fontSize: { xs: "1.95rem", sm: "2.4rem" },
+              fontFamily: '"Cinzel", "Playfair Display", "Raleway", serif',
+              fontSize: { xs: "1.28rem", sm: "2.4rem" },
               fontWeight: 800,
-              letterSpacing: "-0.05em",
-              color: ui.text.primary,
+              letterSpacing: { xs: "0.01em", sm: "-0.03em" },
+              background: theme.palette.mode === "dark"
+                ? "linear-gradient(135deg, #e2e8f0 0%, #7dd3fc 45%, #38bdf8 100%)"
+                : "linear-gradient(135deg, #0f172a 0%, #1e3a8a 45%, #2563eb 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
               whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: { xs: "170px", sm: "none" },
+              textShadow: theme.palette.mode === "dark" ? "0 6px 22px rgba(56, 189, 248, 0.25)" : "0 4px 14px rgba(30, 64, 175, 0.2)",
             }}
           >
-            Elookup
+            Trace Verisys
           </Typography>
         </Box>
 
@@ -210,7 +231,11 @@ export default function Topbar({ title, onToggleSidebar }: TopbarProps) {
           <SearchOutlinedIcon />
         </IconButton>
 
-        <IconButton color="inherit" onClick={toggleMode} sx={iconButtonSx}>
+        <IconButton
+          color="inherit"
+          onClick={toggleMode}
+          sx={{ ...iconButtonSx, display: { xs: "none", sm: "inline-flex" } }}
+        >
           {mode === "dark" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}
         </IconButton>
 
@@ -220,9 +245,22 @@ export default function Topbar({ title, onToggleSidebar }: TopbarProps) {
           target="_blank"
           rel="noreferrer"
           color="inherit"
-          sx={iconButtonSx}
+          sx={{ ...iconButtonSx, display: { xs: "none", sm: "inline-flex" } }}
         >
           <TelegramIcon />
+        </IconButton>
+
+        <IconButton
+          color="inherit"
+          onClick={() => {
+            const role = user?.role ?? "USER";
+            const base = role === "ADMIN" ? "/admin" : role === "RESELLER" ? "/reseller" : "/user";
+            navigate(`${base}/emails`);
+          }}
+          sx={{ ...iconButtonSx, display: { xs: "none", sm: "inline-flex" } }}
+          title="Live Support"
+        >
+          <SupportAgentRoundedIcon />
         </IconButton>
 
         <IconButton color="inherit" onClick={openNotifications} sx={iconButtonSx}>
@@ -349,9 +387,77 @@ export default function Topbar({ title, onToggleSidebar }: TopbarProps) {
           )}
         </Menu>
 
-        <IconButton color="inherit" onClick={logout} sx={iconButtonSx}>
+        <IconButton
+          color="inherit"
+          onClick={logout}
+          sx={{ ...iconButtonSx, display: { xs: "none", sm: "inline-flex" } }}
+        >
           <LogoutOutlinedIcon />
         </IconButton>
+
+        {isMobile ? (
+          <>
+            <IconButton color="inherit" onClick={openMobileActions} sx={iconButtonSx} aria-label="Open more actions">
+              <MoreVertRoundedIcon />
+            </IconButton>
+            <Menu
+              anchorEl={mobileActionsAnchorEl}
+              open={Boolean(mobileActionsAnchorEl)}
+              onClose={closeMobileActions}
+              PaperProps={{
+                sx: {
+                  width: 220,
+                  maxWidth: "calc(100vw - 24px)",
+                  mt: 1,
+                  borderRadius: 3,
+                  color: ui.text.primary,
+                  backgroundColor: ui.surface.overlay,
+                  border: `1px solid ${ui.surface.borderStrong}`,
+                  boxShadow: theme.palette.mode === "dark"
+                    ? "0 20px 60px rgba(2, 6, 23, 0.5)"
+                    : "0 20px 40px rgba(15, 23, 42, 0.12)",
+                },
+              }}
+            >
+              <MenuItem
+                onClick={() => {
+                  toggleMode();
+                  closeMobileActions();
+                }}
+              >
+                <ListItemText primary={mode === "dark" ? "Light Theme" : "Dark Theme"} />
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  closeMobileActions();
+                  const role = user?.role ?? "USER";
+                  const base = role === "ADMIN" ? "/admin" : role === "RESELLER" ? "/reseller" : "/user";
+                  navigate(`${base}/emails`);
+                }}
+              >
+                <ListItemText primary="Live Support" />
+              </MenuItem>
+              <MenuItem
+                component="a"
+                href={telegramUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={closeMobileActions}
+              >
+                <ListItemText primary="Telegram Support" />
+              </MenuItem>
+              <Divider />
+              <MenuItem
+                onClick={() => {
+                  closeMobileActions();
+                  logout();
+                }}
+              >
+                <ListItemText primary="Logout" />
+              </MenuItem>
+            </Menu>
+          </>
+        ) : null}
       </Toolbar>
     </AppBar>
   );

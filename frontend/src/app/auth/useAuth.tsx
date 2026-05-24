@@ -11,6 +11,8 @@ export type Me = {
   expireAt: string | null;
   acceptedDisclaimerAt: string | null;
   theme: "light" | "dark" | null;
+  twoFactorEnabled?: boolean;
+  profileImageData?: string | null;
   status: "ACTIVE" | "SUSPENDED" | "BLACKLISTED";
   createdAt: string;
 };
@@ -36,7 +38,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.localStorage.setItem("dashboardMode", res.data.me.theme);
         window.dispatchEvent(new CustomEvent("dashboard-theme-change", { detail: res.data.me.theme }));
       }
-    } catch (e) {
+    } catch (e: any) {
+      const status = Number(e?.response?.status ?? 0);
+      if (status === 401 || status === 403 || status === 404) {
+        // Stale local role/token state can cause repeated /me retries.
+        clearTokens();
+      }
       setUser(null);
     } finally {
       setLoading(false);

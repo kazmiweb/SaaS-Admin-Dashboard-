@@ -5,7 +5,7 @@ import { HttpError } from "../http/errors.js";
 export type JwtPayload = {
   sub: string;
   role: "ADMIN" | "RESELLER" | "USER";
-  type: "access" | "refresh" | "signup" | "api_key" | "search_request";
+  type: "access" | "refresh" | "signup" | "api_key" | "search_request" | "login_2fa";
   sid?: string;
 };
 
@@ -25,6 +25,11 @@ export function signRefreshToken(userId: string, role: JwtPayload["role"]) {
 
 export function signSignupToken(email: string) {
   return jwt.sign({ sub: email, role: "USER", type: "signup" } satisfies JwtPayload, accessSecret, { expiresIn: 15 * 60, jwtid: nanoid() });
+}
+
+export function signLogin2faToken(userId: string, role: JwtPayload["role"]) {
+  const ttl = Math.max(120, Number(process.env.LOGIN_2FA_TTL_SECONDS ?? 10 * 60));
+  return jwt.sign({ sub: userId, role, type: "login_2fa" } satisfies JwtPayload, accessSecret, { expiresIn: ttl, jwtid: nanoid() });
 }
 
 export function verifyAccess(token: string): JwtPayload {
@@ -48,6 +53,14 @@ export function verifySignup(token: string): JwtPayload {
     return jwt.verify(token, accessSecret) as JwtPayload;
   } catch {
     throw new HttpError(401, "UNAUTHORIZED", "Invalid or expired signup token");
+  }
+}
+
+export function verifyLogin2fa(token: string): JwtPayload {
+  try {
+    return jwt.verify(token, accessSecret) as JwtPayload;
+  } catch {
+    throw new HttpError(401, "UNAUTHORIZED", "Invalid or expired 2FA challenge token");
   }
 }
 

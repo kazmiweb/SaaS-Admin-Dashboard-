@@ -37,7 +37,7 @@ export default function FamilyTree() {
   async function copyGraph() {
     if (!payload) return;
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    toast({ status: "success", title: "Family tree graph copied", position: "top" });
+    toast({ status: "success", title: "Family tree data copied", position: "top" });
   }
 
   return (
@@ -46,7 +46,7 @@ export default function FamilyTree() {
         Mix Family Tree
       </Heading>
       <Text opacity={0.85} mb={4}>
-        ENTER Your CNIC to render Family Tree Graph
+        Enter your CNIC to view family records with details and pictures.
       </Text>
       <Box bg={ui.surface.card} border={`1px solid ${ui.surface.border}`} borderRadius="22px" p={{ base: 4, md: 6 }}>
         <Stack spacing={4}>
@@ -71,14 +71,14 @@ export default function FamilyTree() {
             </Button>
             {payload ? (
               <Button colorScheme="green" borderRadius="999px" size="lg" onClick={copyGraph}>
-                Copy to Clipboard
+                Copy Raw Data
               </Button>
             ) : null}
           </Stack>
 
           {!payload ? (
             <Box pt={8} pb={6} textAlign="center">
-              <Text opacity={0.8}>Enter Your CNIC to render Family Tree Graph.</Text>
+              <Text opacity={0.8}>Enter your CNIC to load family records.</Text>
             </Box>
           ) : (
             <FamilyTreeGraph payload={payload} />

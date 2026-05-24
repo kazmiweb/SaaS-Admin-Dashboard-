@@ -270,7 +270,8 @@ export async function getSecuritySummary() {
 }
 
 export async function listIpAbuse(limit = 50) {
-  const take = Math.min(2000, Math.max(100, limit * 10));
+  const safeLimit = Math.min(200, Math.max(1, Math.trunc(limit)));
+  const take = Math.min(4000, Math.max(150, safeLimit * 20));
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const [logs, blacklistedIps] = await Promise.all([
     prisma.accessLog.findMany({
@@ -318,23 +319,49 @@ export async function listIpAbuse(limit = 50) {
       blacklistReason: blockedMap.get(item.ip) ?? null,
       suspicious: item.failed >= AUTH_FAILURE_THRESHOLD || Object.keys(item.reasons).some((reason) => reason.includes("OTP") || reason === "DEVICE_MISMATCH"),
       tempBlocked: false,
-    }))
-    .sort((a, b) => b.failed - a.failed || b.total - a.total)
-    .slice(0, Math.min(200, Math.max(1, limit)));
+    }));
 
-  return { items };
+  for (const blocked of blacklistedIps) {
+    if (byIp.has(blocked.ip)) continue;
+    items.push({
+      ip: blocked.ip,
+      total: 0,
+      failed: 0,
+      successful: 0,
+      lastSeenAt: since24h,
+      reasons: {},
+      blacklisted: true,
+      blacklistReason: blocked.reason ?? null,
+      suspicious: true,
+      tempBlocked: false,
+    });
+  }
+
+  const sliced = items
+    .sort((a, b) => Number(b.blacklisted) - Number(a.blacklisted) || b.failed - a.failed || b.total - a.total)
+    .slice(0, safeLimit);
+
+  return { items: sliced, total: items.length };
 }
 
-export async function listAuthFailures(limit = 50) {
-  const take = Math.min(200, Math.max(1, limit));
-  const rows = await prisma.accessLog.findMany({
-    where: { success: false },
-    orderBy: { createdAt: "desc" },
-    take,
-    include: { user: { select: { id: true, email: true, name: true, role: true, status: true } } },
-  });
+export async function listAuthFailures(limit = 50, page = 1) {
+  const take = Math.min(200, Math.max(1, Math.trunc(limit)));
+  const currentPage = Math.max(1, Math.trunc(page));
+  const skip = (currentPage - 1) * take;
+  const where = { success: false };
 
-  return rows.map((item) => ({
+  const [rows, total] = await Promise.all([
+    prisma.accessLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      include: { user: { select: { id: true, email: true, name: true, role: true, status: true } } },
+    }),
+    prisma.accessLog.count({ where }),
+  ]);
+
+  const items = rows.map((item) => ({
     id: item.id,
     ip: item.ip,
     email: item.email,
@@ -343,4 +370,107 @@ export async function listAuthFailures(limit = 50) {
     user: item.user,
     suspicious: ["BAD_PASSWORD", "EMAIL_NOT_FOUND", "DEVICE_MISMATCH", "OTP_INVALID", "BLACKLISTED"].includes(item.reason ?? ""),
   }));
+
+  return { items, total, page: currentPage, limit: take };
+}
+
+export async function setIpListType(input: {
+  ip: string;
+  type: "BLACKLIST" | "WHITELIST";
+  reason?: string | null;
+}) {
+  const normalizedIp = input.ip.trim();
+  if (!normalizedIp) throw new HttpError(400, "BAD_REQUEST", "IP is required");
+
+  return prisma.iPList.upsert({
+    where: { ip: normalizedIp },
+    update: {
+      type: input.type,
+      reason: input.reason ?? null,
+    },
+    create: {
+      ip: normalizedIp,
+      type: input.type,
+      reason: input.reason ?? null,
+    },
+  });
+}
+
+export async function removeIpFromList(ip: string) {
+  const normalizedIp = ip.trim();
+  if (!normalizedIp) throw new HttpError(400, "BAD_REQUEST", "IP is required");
+
+  await prisma.iPList.deleteMany({ where: { ip: normalizedIp } });
+  return { ip: normalizedIp };
+}
+
+export async function listBlockedIps(limit = 50, page = 1) {
+  const take = Math.min(200, Math.max(1, Math.trunc(limit)));
+  const currentPage = Math.max(1, Math.trunc(page));
+  const skip = (currentPage - 1) * take;
+
+  const [items, total] = await Promise.all([
+    prisma.iPList.findMany({
+      where: { type: "BLACKLIST" },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      select: { id: true, ip: true, reason: true, type: true, createdAt: true },
+    }),
+    prisma.iPList.count({ where: { type: "BLACKLIST" } }),
+  ]);
+
+  return { items, total, page: currentPage, limit: take };
+}
+
+export async function whitelistUser(input: { userId: string; actorId: string; ip: string; reason?: string }) {
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { id: true, status: true, email: true },
+  });
+  if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
+
+  const updated = await prisma.user.update({
+    where: { id: input.userId },
+    data: { status: "ACTIVE" },
+    select: { id: true, email: true, name: true, role: true, status: true },
+  });
+
+  await recordAdminAction({
+    actorId: input.actorId,
+    action: "ADMIN_WHITELIST_USER",
+    ip: input.ip,
+    meta: { userId: input.userId, reason: input.reason ?? null, previousStatus: user.status },
+  });
+
+  return updated;
+}
+
+export async function getTempBlockedIps(limit = 200) {
+  const keys = await withRedisTimeout(redis.keys("security:temp-block:*"), [] as string[]);
+  if (!keys.length) return [];
+
+  const ips = keys
+    .map((key) => key.split(":").slice(-1)[0])
+    .filter(Boolean)
+    .slice(0, Math.max(1, limit));
+
+  const ttlPairs = await Promise.all(
+    ips.map(async (ip) => ({
+      ip,
+      ttl: await withRedisTimeout(redis.ttl(tempBlockKey(ip)), -1),
+    }))
+  );
+
+  return ttlPairs
+    .filter((item) => item.ttl > 0)
+    .map((item) => ({ ip: item.ip, ttlSeconds: item.ttl }));
+}
+
+export async function clearTempIpBlock(ip: string) {
+  const normalizedIp = ip.trim();
+  if (!normalizedIp) throw new HttpError(400, "BAD_REQUEST", "IP is required");
+
+  await withRedisTimeout(redis.del(tempBlockKey(normalizedIp)), 0);
+  return { ip: normalizedIp };
 }

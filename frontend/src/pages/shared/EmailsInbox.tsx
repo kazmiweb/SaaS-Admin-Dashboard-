@@ -65,6 +65,7 @@ export default function EmailsInbox() {
   const [error, setError] = React.useState<string | null>(null);
 
   const activeTicket = React.useMemo(() => tickets.find((item) => item.id === activeTicketId) ?? null, [tickets, activeTicketId]);
+  const chatClosed = activeTicket?.status === "RESOLVED" || activeTicket?.status === "CLOSED";
 
   const fetchTickets = React.useCallback(async () => {
     const url = isAdmin ? "/support/admin/tickets" : "/support/my/tickets";
@@ -145,6 +146,10 @@ export default function EmailsInbox() {
 
   async function sendReply() {
     if (!activeTicket || !replyText.trim()) return;
+    if (chatClosed) {
+      setError("This ticket is closed/resolved. New messages are disabled.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -176,10 +181,10 @@ export default function EmailsInbox() {
     <Stack spacing={3.2}>
       <Box>
         <Typography variant="h4" sx={{ color: ui.text.primary, fontWeight: 900 }}>
-          Support Inbox & Live Chat
+          Live Support
         </Typography>
         <Typography variant="body2" sx={{ color: ui.text.secondary }}>
-          Complaint token based contact center. Messages refresh every 5 seconds for near real-time support.
+          Ticket based messenger workspace. Messages refresh every 5 seconds for near real-time support.
         </Typography>
       </Box>
 
@@ -189,36 +194,40 @@ export default function EmailsInbox() {
         <Card sx={{ flex: 1.02, minHeight: 640 }}>
           <CardContent sx={{ p: 2.2 }}>
             <Stack spacing={2}>
-              <Box>
-                <Typography variant="h6" sx={{ color: ui.text.primary, fontWeight: 800 }}>
-                  Create Complaint
-                </Typography>
-                <Typography variant="caption" sx={{ color: ui.text.secondary }}>
-                  New ticket generates a unique token for tracking.
-                </Typography>
-              </Box>
+              {!isAdmin ? (
+                <>
+                  <Box>
+                    <Typography variant="h6" sx={{ color: ui.text.primary, fontWeight: 800 }}>
+                      Generate Ticket
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: ui.text.secondary }}>
+                      New ticket generates a unique token for tracking.
+                    </Typography>
+                  </Box>
 
-              <TextField
-                size="small"
-                label="Subject"
-                value={newSubject}
-                onChange={(event) => setNewSubject(event.target.value)}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label="Message"
-                value={newMessage}
-                onChange={(event) => setNewMessage(event.target.value)}
-                fullWidth
-                multiline
-                minRows={3}
-              />
-              <Button variant="contained" onClick={createTicket} disabled={busy}>
-                Create Ticket
-              </Button>
+                  <TextField
+                    size="small"
+                    label="Subject"
+                    value={newSubject}
+                    onChange={(event) => setNewSubject(event.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Message"
+                    value={newMessage}
+                    onChange={(event) => setNewMessage(event.target.value)}
+                    fullWidth
+                    multiline
+                    minRows={3}
+                  />
+                  <Button variant="contained" onClick={createTicket} disabled={busy}>
+                    Generate Ticket
+                  </Button>
 
-              <Divider />
+                  <Divider />
+                </>
+              ) : null}
 
               <Typography variant="subtitle2" sx={{ color: ui.text.primary, fontWeight: 800 }}>
                 {isAdmin ? "All Tickets" : "My Tickets"}
@@ -296,6 +305,7 @@ export default function EmailsInbox() {
                           <Select
                             value={statusValue}
                             label="Status"
+                            disabled={chatClosed || busy}
                             onChange={(event) => setStatusValue(event.target.value as Ticket["status"])}
                           >
                             <MenuItem value="OPEN">OPEN</MenuItem>
@@ -304,7 +314,7 @@ export default function EmailsInbox() {
                             <MenuItem value="CLOSED">CLOSED</MenuItem>
                           </Select>
                         </FormControl>
-                        <Button size="small" variant="outlined" onClick={updateStatus} disabled={busy}>
+                        <Button size="small" variant="outlined" onClick={updateStatus} disabled={busy || chatClosed}>
                           Update
                         </Button>
                       </>
@@ -347,16 +357,17 @@ export default function EmailsInbox() {
                   <TextField
                     value={replyText}
                     onChange={(event) => setReplyText(event.target.value)}
-                    placeholder={isAdmin ? "Reply to user..." : "Write message for admin..."}
+                    placeholder={chatClosed ? "Ticket closed. Messages disabled." : isAdmin ? "Reply to user..." : "Write message for support..."}
                     fullWidth
                     multiline
                     minRows={2}
+                    disabled={chatClosed}
                   />
                   <Button
                     variant="contained"
                     startIcon={<SendRoundedIcon />}
                     onClick={sendReply}
-                    disabled={busy || !replyText.trim()}
+                    disabled={busy || !replyText.trim() || chatClosed}
                     sx={{ minWidth: 126 }}
                   >
                     Send

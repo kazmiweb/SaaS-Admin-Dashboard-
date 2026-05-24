@@ -3,12 +3,13 @@ import { api } from "../../app/ApiService";
 import { useAuth } from "../../app/auth/useAuth";
 import { useServices } from "../../app/services/useServices";
 import ResultCards, { type ResultCardItem } from "../components/ResultCards";
-import { Box, Card, CardContent, Stack, Typography, useTheme } from "@mui/material";
+import { Box, Card, CardContent, Stack, Typography, useMediaQuery, useTheme } from "@mui/material";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import { getDashboardUi } from "../uiTokens";
 
 export default function ResellerOverview() {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const ui = getDashboardUi(theme.palette.mode);
   const { user } = useAuth();
   const { services } = useServices(true);
@@ -20,7 +21,7 @@ export default function ResellerOverview() {
 
   const cards = useMemo<ResultCardItem[]>(
     () => [
-      { label: "Credits", value: user?.credits ?? 0, helper: "Reseller account balance" },
+      { label: "Credits", value: user?.credits ?? 0, helper: "Admin account balance" },
       { label: "Active Services", value: services.length, helper: "Mapped from backend service layer" },
       { label: "Recent Searches", value: searches.length, helper: "Shared search backend" },
       { label: "Status", value: user?.status ?? "-", helper: "JWT/session driven access" },
@@ -51,11 +52,15 @@ export default function ResellerOverview() {
       <Card>
         <CardContent>
           <Typography variant="h6" mb={2}>Latest Search Activity</Typography>
-          <Box sx={{ height: 380 }}>
+          <Box sx={{ height: isMobile ? "auto" : 380 }}>
             <DataGrid
               rows={searches.map((item) => ({ ...item, id: item.id }))}
               columns={columns}
               disableRowSelectionOnClick
+              autoHeight={isMobile}
+              columnVisibilityModel={{
+                detectedType: !isMobile,
+              }}
               pageSizeOptions={[8]}
               initialState={{ pagination: { paginationModel: { pageSize: 8, page: 0 } } }}
             />

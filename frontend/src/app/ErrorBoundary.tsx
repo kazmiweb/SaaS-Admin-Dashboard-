@@ -1,18 +1,44 @@
 import React from "react";
-import { Box, Button, Typography } from "@mui/material";
+import { Box, Button, Stack, Typography } from "@mui/material";
 
 type ErrorBoundaryState = {
   hasError: boolean;
+  errorMessage: string;
 };
+
+const BOOTSTRAP_STORAGE_KEYS = [
+  "accessToken",
+  "refreshToken",
+  "role",
+  "dashboardMode",
+  "elookup_sidebar",
+  "elookup_services_expanded",
+];
+
+function clearBootstrapStorage() {
+  if (typeof window === "undefined") return;
+  try {
+    for (const key of BOOTSTRAP_STORAGE_KEYS) {
+      window.localStorage.removeItem(key);
+    }
+    window.sessionStorage.removeItem("__elookup_chunk_reload_once__");
+  } catch {
+    // ignore storage cleanup failures
+  }
+}
 
 export default class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   ErrorBoundaryState
 > {
-  state: ErrorBoundaryState = { hasError: false };
+  state: ErrorBoundaryState = { hasError: false, errorMessage: "" };
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error: unknown) {
+    const message =
+      typeof error === "object" && error && "message" in error
+        ? String((error as any).message ?? "")
+        : String(error ?? "");
+    return { hasError: true, errorMessage: message.slice(0, 260) };
   }
 
   componentDidCatch(error: unknown) {
@@ -37,11 +63,27 @@ export default class ErrorBoundary extends React.Component<
               UI crashed during startup
             </Typography>
             <Typography sx={{ opacity: 0.8, mb: 3 }}>
-              Frontend bootstrap failed. Refresh once. If the problem stays, clear stale local storage and retry login.
+              Frontend bootstrap failed. Refresh once. If the problem stays, reset local app data and retry login.
             </Typography>
-            <Button variant="contained" onClick={() => window.location.assign("/login")}>
-              Go to login
-            </Button>
+            {this.state.errorMessage ? (
+              <Typography sx={{ opacity: 0.72, fontSize: "0.8rem", mb: 2, wordBreak: "break-word" }}>
+                {this.state.errorMessage}
+              </Typography>
+            ) : null}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} justifyContent="center">
+              <Button variant="outlined" color="inherit" onClick={() => window.location.reload()}>
+                Refresh app
+              </Button>
+              <Button
+                variant="contained"
+                onClick={() => {
+                  clearBootstrapStorage();
+                  window.location.assign("/login");
+                }}
+              >
+                Reset data and login
+              </Button>
+            </Stack>
           </Box>
         </Box>
       );

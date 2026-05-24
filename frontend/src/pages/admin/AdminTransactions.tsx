@@ -17,6 +17,7 @@ import {
   TableRow,
   TextField,
   Typography,
+  useMediaQuery,
   useTheme,
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
@@ -25,6 +26,7 @@ import { getDashboardUi } from "../../dashboard/uiTokens";
 
 export default function AdminTransactions() {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const ui = getDashboardUi(theme.palette.mode);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -73,6 +75,7 @@ export default function AdminTransactions() {
         .includes(needle)
     );
   }, [items, query]);
+  const actionButtonSx = { minWidth: { xs: "100%", sm: 132 }, whiteSpace: "nowrap" } as const;
 
   return (
     <Stack spacing={3}>
@@ -83,52 +86,100 @@ export default function AdminTransactions() {
           </Typography>
           <Typography sx={{ color: ui.text.secondary }}>Revenue-linked transactions and billing records.</Typography>
         </Box>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-          <TextField
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search transactions"
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchRoundedIcon fontSize="small" />
-                </InputAdornment>
-              ),
-            }}
-            size="small"
-          />
-          <TextField
-            select
-            size="small"
-            value={billingType}
-            onChange={(e) => setBillingType(e.target.value)}
-            sx={{ minWidth: 180 }}
+        <Stack spacing={1.25} sx={{ width: { xs: "100%", lg: "auto" }, alignItems: { xs: "stretch", lg: "flex-end" } }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.25}
+            useFlexGap
+            flexWrap="wrap"
+            sx={{ width: "100%", justifyContent: { xs: "stretch", lg: "flex-end" } }}
           >
-            <MenuItem value="">All Billing</MenuItem>
-            <MenuItem value="PAID">PAID</MenuItem>
-            <MenuItem value="FREE">FREE</MenuItem>
-            <MenuItem value="DEMO">DEMO</MenuItem>
-          </TextField>
-          <TextField size="small" type="date" label="From" value={from} onChange={(e) => setFrom(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField size="small" type="date" label="To" value={to} onChange={(e) => setTo(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <Button startIcon={<RefreshRoundedIcon />} variant="contained" onClick={load} disabled={loading}>
-            Refresh
-          </Button>
-          <Button
-            startIcon={<DownloadRoundedIcon />}
-            variant="outlined"
-            component="a"
-            href={buildExportHref("exports/transactions.csv")}
-            target="_blank"
+            <TextField
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search transactions"
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchRoundedIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              }}
+              size="small"
+              sx={{ minWidth: { sm: 220 }, flex: { sm: "1 1 240px" } }}
+            />
+            <TextField
+              select
+              size="small"
+              value={billingType}
+              onChange={(e) => setBillingType(e.target.value)}
+              sx={{ minWidth: { sm: 170 }, flex: { sm: "0 1 180px" } }}
+            >
+              <MenuItem value="">All Billing</MenuItem>
+              <MenuItem value="PAID">PAID</MenuItem>
+              <MenuItem value="FREE">FREE</MenuItem>
+              <MenuItem value="DEMO">DEMO</MenuItem>
+            </TextField>
+            <TextField
+              size="small"
+              type="date"
+              label="From"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: { sm: 150 }, flex: { sm: "0 1 160px" } }}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="To"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ minWidth: { sm: 150 }, flex: { sm: "0 1 160px" } }}
+            />
+          </Stack>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1}
+            useFlexGap
+            flexWrap="wrap"
+            sx={{ width: "100%", justifyContent: { xs: "stretch", lg: "flex-end" } }}
           >
-            Tx CSV
-          </Button>
-          <Button startIcon={<DownloadRoundedIcon />} variant="outlined" component="a" href={buildExportHref("exports/revenue.csv")} target="_blank">
-            Revenue CSV
-          </Button>
-          <Button startIcon={<DownloadRoundedIcon />} variant="outlined" component="a" href={buildExportHref("exports/activity.csv")} target="_blank">
-            Activity CSV
-          </Button>
+            <Button startIcon={<RefreshRoundedIcon />} variant="contained" onClick={load} disabled={loading} sx={actionButtonSx}>
+              Refresh
+            </Button>
+            <Button
+              startIcon={<DownloadRoundedIcon />}
+              variant="outlined"
+              component="a"
+              href={buildExportHref("exports/transactions.csv")}
+              target="_blank"
+              sx={actionButtonSx}
+            >
+              Tx CSV
+            </Button>
+            <Button
+              startIcon={<DownloadRoundedIcon />}
+              variant="outlined"
+              component="a"
+              href={buildExportHref("exports/revenue.csv")}
+              target="_blank"
+              sx={actionButtonSx}
+            >
+              Revenue CSV
+            </Button>
+            <Button
+              startIcon={<DownloadRoundedIcon />}
+              variant="outlined"
+              component="a"
+              href={buildExportHref("exports/activity.csv")}
+              target="_blank"
+              sx={actionButtonSx}
+            >
+              Activity CSV
+            </Button>
+          </Stack>
         </Stack>
       </Stack>
 
@@ -136,39 +187,66 @@ export default function AdminTransactions() {
 
       <Card>
         <CardContent>
-          <Box sx={{ overflowX: "auto", color: ui.text.primary }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Date</TableCell>
-                  <TableCell>User</TableCell>
-                  <TableCell>Billing</TableCell>
-                  <TableCell align="right">Coins</TableCell>
-                  <TableCell align="right">PKR</TableCell>
-                  <TableCell>Note</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filtered.map((item) => (
-                  <TableRow key={item.id} hover>
-                    <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}</TableCell>
-                    <TableCell>{item.user?.email ?? "-"}</TableCell>
-                    <TableCell>{item.user?.billingType ?? "-"}</TableCell>
-                    <TableCell align="right">{item.coins ?? 0}</TableCell>
-                    <TableCell align="right">{item.amountPkr ?? 0}</TableCell>
-                    <TableCell>{item.note ?? "-"}</TableCell>
-                  </TableRow>
-                ))}
-                {!filtered.length ? (
+          {isMobile ? (
+            <Stack spacing={1.5}>
+              {filtered.map((item) => (
+                <Card key={item.id} variant="outlined" sx={{ borderColor: ui.surface.borderStrong, backgroundColor: ui.surface.card }}>
+                  <CardContent sx={{ p: 1.5 }}>
+                    <Stack spacing={0.8}>
+                      <Typography fontWeight={800}>{item.user?.email ?? "-"}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Date: {item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Billing: {item.user?.billingType ?? "-"}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Coins: {item.coins ?? 0} • PKR: {item.amountPkr ?? 0}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Note: {item.note ?? "-"}
+                      </Typography>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              ))}
+              {!filtered.length ? <Typography color="text.secondary">No transactions found.</Typography> : null}
+            </Stack>
+          ) : (
+            <Box sx={{ overflowX: "auto", color: ui.text.primary }}>
+              <Table size="small">
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={6}>
-                      <Typography color="text.secondary">No transactions found.</Typography>
-                    </TableCell>
+                    <TableCell>Date</TableCell>
+                    <TableCell>User</TableCell>
+                    <TableCell>Billing</TableCell>
+                    <TableCell align="right">Coins</TableCell>
+                    <TableCell align="right">PKR</TableCell>
+                    <TableCell>Note</TableCell>
                   </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </Box>
+                </TableHead>
+                <TableBody>
+                  {filtered.map((item) => (
+                    <TableRow key={item.id} hover>
+                      <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}</TableCell>
+                      <TableCell>{item.user?.email ?? "-"}</TableCell>
+                      <TableCell>{item.user?.billingType ?? "-"}</TableCell>
+                      <TableCell align="right">{item.coins ?? 0}</TableCell>
+                      <TableCell align="right">{item.amountPkr ?? 0}</TableCell>
+                      <TableCell>{item.note ?? "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!filtered.length ? (
+                    <TableRow>
+                      <TableCell colSpan={6}>
+                        <Typography color="text.secondary">No transactions found.</Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </Box>
+          )}
         </CardContent>
       </Card>
     </Stack>

@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import ChatRoundedIcon from "@mui/icons-material/ChatRounded";
+import React, { useEffect, useState } from "react";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import TelegramIcon from "@mui/icons-material/Telegram";
 import {
@@ -23,6 +22,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../app/api";
 import { setTokens } from "../app/auth";
 import { getDeviceId } from "../app/device";
+import { useAuth } from "../app/auth/useAuth";
+import {
+  extractCooldownSeconds,
+  extractExpiresInSeconds,
+  extractRetryAfterSeconds,
+  normalizeEmailInput,
+  normalizeOtpInput,
+} from "../utils/otp";
 
 type PublicSupportMessage = {
   id: string;
@@ -40,6 +47,7 @@ const QUICK_TEMPLATES = [
 
 export default function Login() {
   const nav = useNavigate();
+  const { refreshMe } = useAuth();
   const telegramUrl = import.meta.env.VITE_TELEGRAM_URL || "https://t.me/elookup_support";
 
   const [email, setEmail] = useState("");
@@ -51,6 +59,14 @@ export default function Login() {
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
   const [resetEmail, setResetEmail] = useState("");
+  const [twoFaRequired, setTwoFaRequired] = useState(false);
+  const [twoFaOtp, setTwoFaOtp] = useState("");
+  const [twoFaChallengeToken, setTwoFaChallengeToken] = useState("");
+  const [twoFaHint, setTwoFaHint] = useState("");
+  const [twoFaCooldownLeft, setTwoFaCooldownLeft] = useState(0);
+  const [twoFaExpiresInLeft, setTwoFaExpiresInLeft] = useState<number | null>(null);
+  const [resetCooldownLeft, setResetCooldownLeft] = useState(0);
+  const [resetExpiresInLeft, setResetExpiresInLeft] = useState<number | null>(null);
 
   const [chatOpen, setChatOpen] = useState(false);
   const [contactName, setContactName] = useState("");
@@ -62,24 +78,89 @@ export default function Login() {
   const [contactBusy, setContactBusy] = useState(false);
   const [contactErr, setContactErr] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (
+      twoFaCooldownLeft <= 0 &&
+      (!twoFaExpiresInLeft || twoFaExpiresInLeft <= 0) &&
+      resetCooldownLeft <= 0 &&
+      (!resetExpiresInLeft || resetExpiresInLeft <= 0)
+    ) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setTwoFaCooldownLeft((prev) => (prev > 0 ? prev - 1 : 0));
+      setResetCooldownLeft((prev) => (prev > 0 ? prev - 1 : 0));
+      setTwoFaExpiresInLeft((prev) => {
+        if (prev === null) return prev;
+        return prev > 0 ? prev - 1 : 0;
+      });
+      setResetExpiresInLeft((prev) => {
+        if (prev === null) return prev;
+        return prev > 0 ? prev - 1 : 0;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [twoFaCooldownLeft, twoFaExpiresInLeft, resetCooldownLeft, resetExpiresInLeft]);
+
+  function handleLoginSuccess(data: any) {
+    setTokens(data.accessToken ?? null, data.refreshToken ?? null, data.role);
+    const nextPath = data.role === "ADMIN" ? "/admin/dashboard" : data.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard";
+    nav(nextPath, { replace: true });
+    refreshMe().catch(() => void 0);
+  }
+
+  function clearTwoFaState() {
+    setTwoFaRequired(false);
+    setTwoFaOtp("");
+    setTwoFaChallengeToken("");
+    setTwoFaHint("");
+    setTwoFaCooldownLeft(0);
+    setTwoFaExpiresInLeft(null);
+  }
+
+  function applyTwoFaMeta(data: any) {
+    const cooldown = extractCooldownSeconds(data);
+    if (cooldown) setTwoFaCooldownLeft(cooldown);
+    const expiresIn = extractExpiresInSeconds(data);
+    if (expiresIn) setTwoFaExpiresInLeft(expiresIn);
+  }
+
+  function applyResetMeta(data: any) {
+    const cooldown = extractCooldownSeconds(data);
+    if (cooldown) setResetCooldownLeft(cooldown);
+    const expiresIn = extractExpiresInSeconds(data);
+    if (expiresIn) setResetExpiresInLeft(expiresIn);
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     setBusy(true);
     try {
       const deviceId = getDeviceId();
-      const resp = await api.post("/auth/login", { email, password, deviceId });
-      if (resp.data.role === "USER" || resp.data.role === "RESELLER") {
-        setTokens(null, null, resp.data.role);
-      } else {
-        setTokens(resp.data.accessToken, resp.data.refreshToken, resp.data.role);
+      const loginValue = email.trim();
+      const resp = await api.post("/auth/login", {
+        identifier: loginValue,
+        email: loginValue,
+        password,
+        deviceId,
+      });
+      if (resp?.data?.status === "2fa_required" || resp?.data?.code === "2FA_REQUIRED") {
+        setTwoFaRequired(true);
+        setTwoFaChallengeToken(String(resp?.data?.challengeToken ?? ""));
+        setTwoFaHint(String(resp?.data?.message ?? "2FA OTP sent to your email."));
+        setTwoFaOtp("");
+        applyTwoFaMeta(resp?.data);
+        return;
       }
-      nav(resp.data.role === "ADMIN" ? "/admin/dashboard" : resp.data.role === "RESELLER" ? "/reseller/dashboard" : "/user/dashboard");
+      clearTwoFaState();
+      handleLoginSuccess(resp.data);
     } catch (ex: any) {
       const code = ex?.response?.data?.code;
       if (code === "DEVICE_MISMATCH") {
+        clearTwoFaState();
         setShowReset(true);
-        setResetEmail(email);
+        setResetEmail(loginValue.includes("@") ? normalizeEmailInput(loginValue) : "");
         setErr(ex?.response?.data?.message ?? "This account is currently bound to another device.");
       } else {
         setErr(ex?.response?.data?.message ?? "Login failed");
@@ -89,27 +170,80 @@ export default function Login() {
     }
   }
 
+  async function verifyTwoFaOtp() {
+    setErr(null);
+    const normalizedOtp = normalizeOtpInput(twoFaOtp);
+    setTwoFaOtp(normalizedOtp);
+    setBusy(true);
+    try {
+      const resp = await api.post("/auth/login/2fa/verify", {
+        challengeToken: twoFaChallengeToken,
+        otp: normalizedOtp,
+      });
+      clearTwoFaState();
+      handleLoginSuccess(resp.data);
+    } catch (e: any) {
+      setErr(e?.response?.data?.message ?? "Failed to verify 2FA OTP.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendTwoFaOtp() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const resp = await api.post("/auth/login/2fa/resend", { challengeToken: twoFaChallengeToken });
+      if (resp?.data?.challengeToken) {
+        setTwoFaChallengeToken(String(resp.data.challengeToken));
+      }
+      setTwoFaHint(String(resp?.data?.message ?? "OTP sent again."));
+      applyTwoFaMeta(resp?.data);
+    } catch (e: any) {
+      const waitSeconds = extractRetryAfterSeconds(e);
+      if (waitSeconds) setTwoFaCooldownLeft(waitSeconds);
+      setErr(e?.response?.data?.message ?? "Unable to resend 2FA OTP.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendResetOtp() {
     setErr(null);
+    const normalizedEmail = normalizeEmailInput(resetEmail);
+    setResetEmail(normalizedEmail);
+    setBusy(true);
     try {
-      await api.post("/auth/device-reset/request", { email: resetEmail });
+      const resp = await api.post("/auth/device-reset/request", { email: normalizedEmail });
+      applyResetMeta(resp?.data);
       setOtpSent(true);
     } catch (e: any) {
+      const waitSeconds = extractRetryAfterSeconds(e);
+      if (waitSeconds) setResetCooldownLeft(waitSeconds);
       setErr(e?.response?.data?.message ?? "Failed to send OTP");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function verifyResetOtp() {
     setErr(null);
+    const normalizedEmail = normalizeEmailInput(resetEmail);
+    const normalizedOtp = normalizeOtpInput(otp);
+    setResetEmail(normalizedEmail);
+    setOtp(normalizedOtp);
+    setBusy(true);
     try {
       const newDeviceId = getDeviceId();
-      await api.post("/auth/device-reset/verify", { email: resetEmail, otp, newDeviceId });
+      await api.post("/auth/device-reset/verify", { email: normalizedEmail, otp: normalizedOtp, newDeviceId });
       setShowReset(false);
       setOtpSent(false);
       setOtp("");
       await submit({ preventDefault() {} } as React.FormEvent);
     } catch (e: any) {
       setErr(e?.response?.data?.message ?? "Failed to verify OTP");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -166,7 +300,7 @@ export default function Login() {
     }
   }
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!chatOpen || !contactToken || !contactEmail.trim()) return;
     loadSupportThread(contactToken, contactEmail.trim()).catch(() => void 0);
     const timer = window.setInterval(() => {
@@ -224,7 +358,10 @@ export default function Login() {
                         Reset bound device
                       </Typography>
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
-                        Send OTP to your registered email, then verify to replace the current device.
+                        Send OTP to your registered email, then verify to replace the current device.{" "}
+                        {resetExpiresInLeft && resetExpiresInLeft > 0
+                          ? `Code expires in ${Math.ceil(resetExpiresInLeft / 60)}m ${resetExpiresInLeft % 60}s.`
+                          : ""}
                       </Typography>
                     </Box>
 
@@ -240,21 +377,31 @@ export default function Login() {
                       <TextField
                         label="6-digit OTP"
                         value={otp}
-                        onChange={(e) => setOtp(e.target.value)}
+                        onChange={(e) => setOtp(normalizeOtpInput(e.target.value))}
                         fullWidth
                       />
                     ) : null}
 
                     <Stack direction={{ xs: "column", sm: "row" }} spacing={1.4}>
                       {!otpSent ? (
-                        <Button variant="contained" onClick={sendResetOtp} fullWidth>
-                          Send OTP
+                        <Button variant="contained" onClick={sendResetOtp} disabled={busy || resetCooldownLeft > 0} fullWidth>
+                          {resetCooldownLeft > 0 ? `Send OTP in ${resetCooldownLeft}s` : "Send OTP"}
                         </Button>
                       ) : (
-                        <Button variant="contained" onClick={verifyResetOtp} fullWidth>
+                        <Button variant="contained" onClick={verifyResetOtp} disabled={busy || otp.length !== 6} fullWidth>
                           Verify and reset
                         </Button>
                       )}
+                      {otpSent ? (
+                        <Button
+                          variant="outlined"
+                          onClick={sendResetOtp}
+                          disabled={busy || resetCooldownLeft > 0}
+                          fullWidth
+                        >
+                          {resetCooldownLeft > 0 ? `Resend in ${resetCooldownLeft}s` : "Resend OTP"}
+                        </Button>
+                      ) : null}
                       <Button
                         variant="outlined"
                         color="inherit"
@@ -269,15 +416,66 @@ export default function Login() {
                       </Button>
                     </Stack>
                   </Stack>
+                ) : twoFaRequired ? (
+                  <Stack spacing={2.2} textAlign="left">
+                    <Box>
+                      <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                        2FA Verification
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                        {twoFaHint || "Enter the OTP sent to your email to complete login."}
+                        {twoFaExpiresInLeft && twoFaExpiresInLeft > 0
+                          ? ` Code expires in ${Math.ceil(twoFaExpiresInLeft / 60)}m ${twoFaExpiresInLeft % 60}s.`
+                          : ""}
+                      </Typography>
+                    </Box>
+
+                    <TextField
+                      label="6-digit OTP"
+                      value={twoFaOtp}
+                      onChange={(e) => setTwoFaOtp(normalizeOtpInput(e.target.value))}
+                      fullWidth
+                      autoComplete="one-time-code"
+                    />
+
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.4}>
+                      <Button
+                        variant="contained"
+                        onClick={verifyTwoFaOtp}
+                        disabled={busy || twoFaOtp.length !== 6 || !twoFaChallengeToken}
+                        fullWidth
+                      >
+                        {busy ? "Verifying..." : "Verify & Login"}
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="inherit"
+                        onClick={resendTwoFaOtp}
+                        disabled={busy || !twoFaChallengeToken || twoFaCooldownLeft > 0}
+                        fullWidth
+                      >
+                        {twoFaCooldownLeft > 0 ? `Resend in ${twoFaCooldownLeft}s` : "Resend OTP"}
+                      </Button>
+                    </Stack>
+
+                    <Button
+                      variant="text"
+                      color="inherit"
+                      onClick={clearTwoFaState}
+                      disabled={busy}
+                    >
+                      Back to Login
+                    </Button>
+                  </Stack>
                 ) : (
                   <Box component="form" onSubmit={submit}>
                     <Stack spacing={2.2}>
                       <TextField
-                        label="Email"
-                        type="email"
+                        label="Email or Username"
+                        type="text"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        autoComplete="email"
+                        autoComplete="username"
                         fullWidth
                       />
                       <TextField
@@ -307,15 +505,6 @@ export default function Login() {
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} pt={0.5}>
                   <Button
                     variant="outlined"
-                    color="inherit"
-                    fullWidth
-                    startIcon={<ChatRoundedIcon />}
-                    onClick={openChat}
-                  >
-                    Contact Admin
-                  </Button>
-                  <Button
-                    variant="outlined"
                     color="info"
                     fullWidth
                     startIcon={<TelegramIcon />}
@@ -334,7 +523,7 @@ export default function Login() {
       </Grid>
 
       <Dialog open={chatOpen} onClose={() => setChatOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle sx={{ fontWeight: 900 }}>Contact Admin Chat</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 900 }}>Live Support Chat</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={1.6}>
             <Typography variant="body2" color="text.secondary">

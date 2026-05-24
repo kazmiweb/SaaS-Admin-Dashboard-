@@ -1,10 +1,6 @@
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
-import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
 import CampaignRoundedIcon from "@mui/icons-material/CampaignRounded";
-import DeleteRoundedIcon from "@mui/icons-material/DeleteRounded";
-import PhoneAndroidRoundedIcon from "@mui/icons-material/PhoneAndroidRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
-import SavingsRoundedIcon from "@mui/icons-material/SavingsRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import {
   Alert,
@@ -19,7 +15,6 @@ import {
   DialogContent,
   DialogTitle,
   FormControlLabel,
-  IconButton,
   InputAdornment,
   MenuItem,
   Stack,
@@ -29,19 +24,20 @@ import {
   TableHead,
   TableRow,
   TextField,
-  Tooltip,
   Typography,
+  useMediaQuery,
   useTheme,
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../app/api";
 import { getDashboardUi } from "../../dashboard/uiTokens";
+import { type AppRole, getRoleLabel } from "../../utils/roleLabels";
 
 type UserRow = {
   id: string;
   email: string;
   name: string;
-  role: "ADMIN" | "RESELLER" | "USER";
+  role: AppRole;
   status: "ACTIVE" | "SUSPENDED" | "BLACKLISTED" | "INACTIVE";
   credits: number;
   expireAt: string | null;
@@ -50,6 +46,22 @@ type UserRow = {
   revenueExcluded?: boolean;
   monthlyPackageCoins?: number;
 };
+
+type RenewPackageCode = "MONTHLY_30" | "DAYS_15" | "WEEKLY_7" | "DEMO_1";
+
+const RENEW_PACKAGE_OPTIONS: Array<{ code: RenewPackageCode; label: string; days: number; coins: number }> = [
+  { code: "MONTHLY_30", label: "30 Days Package (1 Month)", days: 30, coins: 300 },
+  { code: "DAYS_15", label: "15 Days Package", days: 15, coins: 150 },
+  { code: "WEEKLY_7", label: "7 Days Package (1 Week)", days: 7, coins: 80 },
+  { code: "DEMO_1", label: "Demo 1 Day Package (24 Hours)", days: 1, coins: 10 },
+];
+
+const CREATE_PACKAGE_OPTIONS: Array<{ code: RenewPackageCode; label: string; days: number; coins: number; billingType: "PAID" | "DEMO" }> = [
+  { code: "MONTHLY_30", label: "Monthly", days: 30, coins: 300, billingType: "PAID" },
+  { code: "DAYS_15", label: "15 Days", days: 15, coins: 150, billingType: "PAID" },
+  { code: "WEEKLY_7", label: "Weekly", days: 7, coins: 80, billingType: "PAID" },
+  { code: "DEMO_1", label: "Demo", days: 1, coins: 10, billingType: "DEMO" },
+];
 
 function statusColor(status: string): "success" | "warning" | "error" | "default" {
   if (status === "ACTIVE") return "success";
@@ -60,6 +72,7 @@ function statusColor(status: string): "success" | "warning" | "error" | "default
 
 export default function AdminUsers() {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const ui = getDashboardUi(theme.palette.mode);
   const [rows, setRows] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -67,26 +80,34 @@ export default function AdminUsers() {
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<UserRow | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [coinsOpen, setCoinsOpen] = useState(false);
-  const [expiryOpen, setExpiryOpen] = useState(false);
+  const [renewOpen, setRenewOpen] = useState(false);
   const [messageOpen, setMessageOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const [serviceAccessUser, setServiceAccessUser] = useState<UserRow | null>(null);
   const [serviceAccess, setServiceAccess] = useState<Array<{ id: string; name: string; status: boolean; allowed: boolean }>>([]);
+  const [renewPackageCode, setRenewPackageCode] = useState<RenewPackageCode>("MONTHLY_30");
 
-  const [createForm, setCreateForm] = useState({
+  const [createForm, setCreateForm] = useState<{
+    email: string;
+    name: string;
+    username: string;
+    password: string;
+    packageCode: RenewPackageCode;
+  }>({
     email: "",
     name: "",
-    password: "",
-    role: "USER",
-    billingType: "PAID",
-    initialCoins: 0,
-    monthlyPackageCoins: 0,
-    daysValid: 30,
+    username: "",
+    password: "0786#0786",
+    packageCode: "MONTHLY_30",
   });
-  const [coinsForm, setCoinsForm] = useState({ coins: 0, mode: "FREE" });
-  const [expiryDays, setExpiryDays] = useState(30);
-  const [messageForm, setMessageForm] = useState({
+  const [messageForm, setMessageForm] = useState<{
+    targetType: "ALL_USERS" | "ROLE" | "USER";
+    role: AppRole;
+    category: "UPDATE" | "BONUS" | "MESSAGE";
+    title: string;
+    message: string;
+    userId: string;
+  }>({
     targetType: "ALL_USERS",
     role: "USER",
     category: "UPDATE",
@@ -112,45 +133,65 @@ export default function AdminUsers() {
     load();
   }, []);
 
+  const roleOptions: AppRole[] = ["USER", "RESELLER", "ADMIN"];
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return rows;
     return rows.filter((user) =>
-      [user.email, user.name, user.role, user.status, user.billingType].filter(Boolean).join(" ").toLowerCase().includes(needle)
+      [user.email, user.name, user.role, getRoleLabel(user.role), user.status, user.billingType]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
     );
   }, [rows, query]);
+  const headerActionButtonSx = { minWidth: { xs: "100%", sm: 148 }, whiteSpace: "nowrap" } as const;
+  const userActionStackSx = {
+    width: "100%",
+    justifyContent: { xs: "flex-start", md: "flex-end" },
+  } as const;
+  const userActionButtonSx = {
+    flex: { xs: "1 1 calc(50% - 6px)", sm: "0 1 auto" },
+    minWidth: { xs: "calc(50% - 6px)", sm: 118 },
+    borderRadius: "999px",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+  } as const;
 
   async function createUser() {
-    const expireAt =
-      Number.isFinite(createForm.daysValid) && createForm.daysValid > 0
-        ? new Date(Date.now() + createForm.daysValid * 24 * 60 * 60 * 1000).toISOString()
-        : undefined;
+    const selectedPackage = CREATE_PACKAGE_OPTIONS.find((item) => item.code === createForm.packageCode);
+    if (!selectedPackage) throw new Error("Please select a package.");
+
+    const expireAt = new Date(Date.now() + selectedPackage.days * 24 * 60 * 60 * 1000).toISOString();
 
     await api.post("/admin/users-full", {
-      email: createForm.email,
-      name: createForm.name,
+      email: createForm.email.trim(),
+      name: createForm.name.trim() || createForm.username.trim(),
+      username: createForm.username.trim(),
       password: createForm.password,
-      role: createForm.role,
-      billingType: createForm.billingType,
-      credits: createForm.initialCoins,
-      monthlyPackageCoins: createForm.monthlyPackageCoins,
+      role: "USER",
+      billingType: selectedPackage.billingType,
+      credits: selectedPackage.coins,
+      monthlyPackageCoins: selectedPackage.coins,
       expireAt,
     });
   }
 
   async function handleCreateUser() {
     try {
+      if (!createForm.email.trim() || !createForm.name.trim() || !createForm.username.trim() || !createForm.password.trim()) {
+        setError("Email, Name, Username and Password are required.");
+        return;
+      }
       await createUser();
       setCreateOpen(false);
       setCreateForm({
         email: "",
         name: "",
-        password: "",
-        role: "USER",
-        billingType: "PAID",
-        initialCoins: 0,
-        monthlyPackageCoins: 0,
-        daysValid: 30,
+        username: "",
+        password: "0786#0786",
+        packageCode: "MONTHLY_30",
       });
       await load();
     } catch (e: any) {
@@ -158,44 +199,28 @@ export default function AdminUsers() {
     }
   }
 
-  async function toggleStatus(user: UserRow) {
-    try {
-      await api.post(`/admin/users-full/${user.id}/status`, {});
-      await load();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || "Failed to update user status.");
-    }
-  }
-
   async function resetDevice(user: UserRow) {
+    if (!window.confirm(`Reset bound device for ${user.email}?`)) return;
     try {
       await api.post(`/admin/users/${user.id}/reset-device`, {});
+      await load();
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || "Failed to reset device.");
     }
   }
 
-  async function addCoins() {
+  async function renewPackage() {
     if (!selected) return;
+    const selectedPackage = RENEW_PACKAGE_OPTIONS.find((item) => item.code === renewPackageCode);
+    if (!selectedPackage) return;
+    if (!window.confirm(`Renew package for ${selected.email} with ${selectedPackage.label}?`)) return;
     try {
-      await api.post(`/admin/users-full/${selected.id}/add-coins`, coinsForm);
-      setCoinsOpen(false);
-      setCoinsForm({ coins: 0, mode: "FREE" });
+      await api.post(`/admin/users-full/${selected.id}/renew-package`, { packageCode: renewPackageCode });
+      setRenewOpen(false);
+      setRenewPackageCode("MONTHLY_30");
       await load();
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || "Failed to add coins.");
-    }
-  }
-
-  async function extendExpiry() {
-    if (!selected) return;
-    try {
-      await api.post(`/admin/users-full/${selected.id}/extend-expiry`, { days: expiryDays });
-      setExpiryOpen(false);
-      setExpiryDays(30);
-      await load();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || "Failed to extend expiry.");
+      setError(e?.response?.data?.message || e?.message || "Failed to renew package.");
     }
   }
 
@@ -210,6 +235,7 @@ export default function AdminUsers() {
   }
 
   async function sendMessage() {
+    if (!window.confirm("Send this message now?")) return;
     try {
       await api.post("/admin/notifications/send", {
         targetType: messageForm.targetType,
@@ -269,13 +295,19 @@ export default function AdminUsers() {
     }
   }
 
-  async function blacklistUser(user: UserRow) {
-    if (!window.confirm(`Blacklist ${user.email}?`)) return;
+  async function toggleBlacklist(user: UserRow) {
+    const isBlacklisted = user.status === "BLACKLISTED";
+    const actionLabel = isBlacklisted ? "whitelist" : "blacklist";
+    if (!window.confirm(`Are you sure you want to ${actionLabel} ${user.email}?`)) return;
     try {
-      await api.post(`/admin/security/users/${user.id}/blacklist`, {});
+      if (isBlacklisted) {
+        await api.post(`/admin/security/users/${user.id}/whitelist`, {});
+      } else {
+        await api.post(`/admin/security/users/${user.id}/blacklist`, {});
+      }
       await load();
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || "Failed to blacklist user.");
+      setError(e?.response?.data?.message || e?.message || `Failed to ${actionLabel} user.`);
     }
   }
 
@@ -287,10 +319,10 @@ export default function AdminUsers() {
             User Management
           </Typography>
           <Typography variant="body2" sx={{ color: ui.text.secondary }}>
-            Manage accounts, balances, expiry, and direct dashboard messages.
+            Manage users, package renewals, security controls, and direct dashboard messages.
           </Typography>
         </Box>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+        <Stack spacing={1.25} sx={{ width: { xs: "100%", lg: "auto" }, alignItems: { xs: "stretch", lg: "flex-end" } }}>
           <TextField
             size="small"
             value={query}
@@ -303,31 +335,41 @@ export default function AdminUsers() {
                 </InputAdornment>
               ),
             }}
+            sx={{ width: "100%", minWidth: { sm: 280 }, maxWidth: { lg: 360 } }}
           />
-          <Button startIcon={<RefreshRoundedIcon />} variant="outlined" onClick={load} disabled={loading}>
-            Refresh
-          </Button>
-          <Button
-            startIcon={<CampaignRoundedIcon />}
-            variant="outlined"
-            onClick={() => {
-              setSelected(null);
-              setMessageForm({
-                targetType: "ALL_USERS",
-                role: "USER",
-                category: "UPDATE",
-                title: "",
-                message: "",
-                userId: "",
-              });
-              setMessageOpen(true);
-            }}
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1}
+            useFlexGap
+            flexWrap="wrap"
+            sx={{ width: "100%", justifyContent: { xs: "stretch", lg: "flex-end" } }}
           >
-            Send Message
-          </Button>
-          <Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => setCreateOpen(true)}>
-            Create User
-          </Button>
+            <Button startIcon={<RefreshRoundedIcon />} variant="outlined" onClick={load} disabled={loading} sx={headerActionButtonSx}>
+              Refresh
+            </Button>
+            <Button
+              startIcon={<CampaignRoundedIcon />}
+              variant="outlined"
+              sx={headerActionButtonSx}
+              onClick={() => {
+                setSelected(null);
+                setMessageForm({
+                  targetType: "ALL_USERS",
+                  role: "USER",
+                  category: "UPDATE",
+                  title: "",
+                  message: "",
+                  userId: "",
+                });
+                setMessageOpen(true);
+              }}
+            >
+              Send Message
+            </Button>
+            <Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => setCreateOpen(true)} sx={headerActionButtonSx}>
+              Create User
+            </Button>
+          </Stack>
         </Stack>
       </Stack>
 
@@ -335,113 +377,146 @@ export default function AdminUsers() {
 
       <Card>
         <CardContent>
-          <Box sx={{ overflowX: "auto", color: ui.text.primary }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>User</TableCell>
-                  <TableCell>Role</TableCell>
-                  <TableCell>Billing</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell align="right">Coins</TableCell>
-                  <TableCell>Expiry</TableCell>
-                  <TableCell align="right">Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filtered.map((user) => (
-                  <TableRow key={user.id} hover>
-                    <TableCell>
-                      <Typography fontWeight={800}>{user.email}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {user.name} • {user.revenueExcluded ? "Revenue excluded" : "Revenue counted"}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip size="small" label={user.role} variant="outlined" />
-                    </TableCell>
-                    <TableCell>
-                      <Typography fontWeight={700}>{user.billingType ?? "PAID"}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Monthly: {user.monthlyPackageCoins ?? 0}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip size="small" label={user.status} color={statusColor(user.status)} variant="outlined" />
-                    </TableCell>
-                    <TableCell align="right">{user.credits ?? 0}</TableCell>
-                    <TableCell>{user.expireAt ? new Date(user.expireAt).toLocaleDateString() : "-"}</TableCell>
-                    <TableCell align="right">
-                      <Stack direction="row" spacing={0.5} justifyContent="flex-end" flexWrap="wrap">
-                        <Tooltip title={user.status === "ACTIVE" ? "Suspend" : "Activate"}>
-                          <IconButton color="warning" onClick={() => toggleStatus(user)}>
-                            <AutorenewRoundedIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Add coins">
-                          <IconButton
-                            color="primary"
-                            onClick={() => {
-                              setSelected(user);
-                              setCoinsOpen(true);
-                            }}
-                          >
-                            <SavingsRoundedIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Extend expiry">
-                          <IconButton
-                            color="secondary"
-                            onClick={() => {
-                              setSelected(user);
-                              setExpiryOpen(true);
-                            }}
-                          >
-                            <AddRoundedIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Reset device">
-                          <IconButton color="info" onClick={() => resetDevice(user)}>
-                            <PhoneAndroidRoundedIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Send message">
-                          <IconButton color="success" onClick={() => openUserMessage(user)}>
-                            <CampaignRoundedIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Button size="small" variant="outlined" onClick={() => openServiceAccess(user)}>
+          {isMobile ? (
+            <Stack spacing={1.5}>
+              {filtered.map((user) => (
+                <Card key={user.id} variant="outlined" sx={{ borderColor: ui.surface.borderStrong, backgroundColor: ui.surface.card }}>
+                  <CardContent sx={{ p: 1.5 }}>
+                    <Stack spacing={1.1}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+                        <Typography fontWeight={800} sx={{ wordBreak: "break-word" }}>{user.email}</Typography>
+                        <Chip size="small" label={user.status} color={statusColor(user.status)} variant="outlined" />
+                      </Stack>
+                      <Typography variant="body2" color="text.secondary">{user.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">Role: {getRoleLabel(user.role)}</Typography>
+                      <Typography variant="body2" color="text.secondary">Billing: {user.billingType ?? "PAID"} • Monthly: {user.monthlyPackageCoins ?? 0}</Typography>
+                      <Typography variant="body2" color="text.secondary">Coins: {user.credits ?? 0}</Typography>
+                      <Typography variant="body2" color="text.secondary">Expiry: {user.expireAt ? new Date(user.expireAt).toLocaleDateString() : "-"}</Typography>
+                      <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={userActionStackSx}>
+                        <Button size="small" variant="outlined" color="secondary" onClick={() => {
+                          setSelected(user);
+                          setRenewPackageCode("MONTHLY_30");
+                          setRenewOpen(true);
+                        }} sx={userActionButtonSx}>
+                          Renew Package
+                        </Button>
+                        <Button size="small" variant="outlined" color="info" onClick={() => resetDevice(user)} sx={userActionButtonSx}>
+                          Reset Device
+                        </Button>
+                        <Button size="small" variant="outlined" color="success" onClick={() => openUserMessage(user)} sx={userActionButtonSx}>
+                          Send Message
+                        </Button>
+                        <Button size="small" variant="outlined" onClick={() => openServiceAccess(user)} sx={userActionButtonSx}>
                           Services
                         </Button>
-                        <Button size="small" color="warning" variant="outlined" onClick={() => blacklistUser(user)}>
-                          Blacklist
+                        <Button
+                          size="small"
+                          color={user.status === "BLACKLISTED" ? "success" : "warning"}
+                          variant="outlined"
+                          onClick={() => toggleBlacklist(user)}
+                          sx={userActionButtonSx}
+                        >
+                          {user.status === "BLACKLISTED" ? "Whitelist" : "Blacklist"}
                         </Button>
-                        <Tooltip title="Delete user">
-                          <IconButton color="error" onClick={() => deleteUser(user)}>
-                            <DeleteRoundedIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        <Button size="small" color="error" variant="outlined" onClick={() => deleteUser(user)} sx={userActionButtonSx}>
+                          Delete User
+                        </Button>
                       </Stack>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!filtered.length ? (
+                    </Stack>
+                  </CardContent>
+                </Card>
+              ))}
+              {!filtered.length ? <Typography color="text.secondary">No users found.</Typography> : null}
+            </Stack>
+          ) : (
+            <Box sx={{ overflowX: "auto", color: ui.text.primary }}>
+              <Table size="small">
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={7}>
-                      <Typography color="text.secondary">No users found.</Typography>
-                    </TableCell>
+                    <TableCell>User</TableCell>
+                    <TableCell>Role</TableCell>
+                    <TableCell>Billing</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell align="right">Coins</TableCell>
+                    <TableCell>Expiry</TableCell>
+                    <TableCell align="right">Actions</TableCell>
                   </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </Box>
+                </TableHead>
+                <TableBody>
+                  {filtered.map((user) => (
+                    <TableRow key={user.id} hover>
+                      <TableCell>
+                        <Typography fontWeight={800}>{user.email}</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {user.name} • {user.revenueExcluded ? "Revenue excluded" : "Revenue counted"}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small" label={getRoleLabel(user.role)} variant="outlined" />
+                      </TableCell>
+                      <TableCell>
+                        <Typography fontWeight={700}>{user.billingType ?? "PAID"}</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Monthly: {user.monthlyPackageCoins ?? 0}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small" label={user.status} color={statusColor(user.status)} variant="outlined" />
+                      </TableCell>
+                      <TableCell align="right">{user.credits ?? 0}</TableCell>
+                      <TableCell>{user.expireAt ? new Date(user.expireAt).toLocaleDateString() : "-"}</TableCell>
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={userActionStackSx}>
+                          <Button size="small" variant="outlined" color="secondary" onClick={() => {
+                            setSelected(user);
+                            setRenewPackageCode("MONTHLY_30");
+                            setRenewOpen(true);
+                          }} sx={userActionButtonSx}>
+                            Renew Package
+                          </Button>
+                          <Button size="small" variant="outlined" color="info" onClick={() => resetDevice(user)} sx={userActionButtonSx}>
+                            Reset Device
+                          </Button>
+                          <Button size="small" variant="outlined" color="success" onClick={() => openUserMessage(user)} sx={userActionButtonSx}>
+                            Send Message
+                          </Button>
+                          <Button size="small" variant="outlined" onClick={() => openServiceAccess(user)} sx={userActionButtonSx}>
+                            Services
+                          </Button>
+                          <Button
+                            size="small"
+                            color={user.status === "BLACKLISTED" ? "success" : "warning"}
+                            variant="outlined"
+                            onClick={() => toggleBlacklist(user)}
+                            sx={userActionButtonSx}
+                          >
+                            {user.status === "BLACKLISTED" ? "Whitelist" : "Blacklist"}
+                          </Button>
+                          <Button size="small" color="error" variant="outlined" onClick={() => deleteUser(user)} sx={userActionButtonSx}>
+                            Delete
+                          </Button>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {!filtered.length ? (
+                    <TableRow>
+                      <TableCell colSpan={7}>
+                        <Typography color="text.secondary">No users found.</Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </Box>
+          )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             Billing, security status, notifications, and service-level access are managed from this screen.
           </Typography>
         </CardContent>
       </Card>
 
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="md">
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth fullScreen={isMobile} maxWidth="md">
         <DialogTitle>Create User</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ pt: 1 }}>
@@ -451,56 +526,34 @@ export default function AdminUsers() {
             </Stack>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
               <TextField
+                label="Username"
+                fullWidth
+                value={createForm.username}
+                onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })}
+              />
+              <TextField
                 label="Password"
                 type="password"
                 fullWidth
                 value={createForm.password}
                 onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
               />
-              <TextField select label="Role" fullWidth value={createForm.role} onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}>
-                <MenuItem value="USER">USER</MenuItem>
-                <MenuItem value="RESELLER">RESELLER</MenuItem>
-                <MenuItem value="ADMIN">ADMIN</MenuItem>
-              </TextField>
             </Stack>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-              <TextField
-                select
-                label="Billing Type"
-                fullWidth
-                value={createForm.billingType}
-                onChange={(e) => setCreateForm({ ...createForm, billingType: e.target.value })}
-              >
-                <MenuItem value="PAID">PAID</MenuItem>
-                <MenuItem value="FREE">FREE</MenuItem>
-                <MenuItem value="DEMO">DEMO</MenuItem>
-              </TextField>
-              <TextField
-                label="Initial Coins"
-                type="number"
-                fullWidth
-                value={createForm.initialCoins}
-                onChange={(e) => setCreateForm({ ...createForm, initialCoins: Number(e.target.value) })}
-              />
-            </Stack>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-              <TextField
-                label="Monthly Package Coins"
-                type="number"
-                fullWidth
-                value={createForm.monthlyPackageCoins}
-                onChange={(e) => setCreateForm({ ...createForm, monthlyPackageCoins: Number(e.target.value) })}
-              />
-              <TextField
-                label="Days Valid"
-                type="number"
-                fullWidth
-                value={createForm.daysValid}
-                onChange={(e) => setCreateForm({ ...createForm, daysValid: Number(e.target.value) })}
-              />
-            </Stack>
+            <TextField
+              select
+              label="Select Package"
+              fullWidth
+              value={createForm.packageCode}
+              onChange={(e) => setCreateForm({ ...createForm, packageCode: e.target.value as RenewPackageCode })}
+            >
+              {CREATE_PACKAGE_OPTIONS.map((item) => (
+                <MenuItem key={`create-package-${item.code}`} value={item.code}>
+                  {item.label} ({item.coins} coins)
+                </MenuItem>
+              ))}
+            </TextField>
             <Typography variant="body2" color="text.secondary">
-              Demo users automatically receive 10 coins. Free and demo traffic is excluded from revenue.
+              Default password is prefilled as 0786#0786. Selected package automatically sets validity and coins.
             </Typography>
           </Stack>
         </DialogContent>
@@ -512,56 +565,37 @@ export default function AdminUsers() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={coinsOpen} onClose={() => setCoinsOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Add Coins</DialogTitle>
+      <Dialog open={renewOpen} onClose={() => setRenewOpen(false)} fullWidth fullScreen={isMobile} maxWidth="sm">
+        <DialogTitle>Renew Package</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ pt: 1 }}>
             <TextField
               select
-              label="Mode"
-              value={coinsForm.mode}
-              onChange={(e) => setCoinsForm({ ...coinsForm, mode: e.target.value })}
+              label="Select Package"
+              value={renewPackageCode}
+              onChange={(e) => setRenewPackageCode(e.target.value as RenewPackageCode)}
             >
-              <MenuItem value="FREE">FREE (no revenue)</MenuItem>
-              <MenuItem value="PAID">PAID (1 coin = 10 PKR)</MenuItem>
+              {RENEW_PACKAGE_OPTIONS.map((item) => (
+                <MenuItem key={item.code} value={item.code}>
+                  {item.label} - {item.coins} Coins
+                </MenuItem>
+              ))}
             </TextField>
-            <TextField
-              label="Coins"
-              type="number"
-              value={coinsForm.coins}
-              onChange={(e) => setCoinsForm({ ...coinsForm, coins: Number(e.target.value) })}
-            />
+            <Typography variant="body2" color="text.secondary">
+              If renewed before expiry, remaining coins are carried forward and days are added.
+              If renewed after expiry, old coins expire and only new package coins are applied.
+            </Typography>
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCoinsOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={addCoins}>
-            Add Coins
+          <Button onClick={() => setRenewOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={renewPackage}>
+            Renew Package
           </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={expiryOpen} onClose={() => setExpiryOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Extend Expiry</DialogTitle>
-        <DialogContent>
-          <TextField
-            sx={{ mt: 1 }}
-            label="Days"
-            type="number"
-            fullWidth
-            value={expiryDays}
-            onChange={(e) => setExpiryDays(Number(e.target.value))}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setExpiryOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={extendExpiry}>
-            Extend
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={messageOpen} onClose={() => setMessageOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={messageOpen} onClose={() => setMessageOpen(false)} fullWidth fullScreen={isMobile} maxWidth="sm">
         <DialogTitle>Send Dashboard Message</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ pt: 1 }}>
@@ -572,12 +606,12 @@ export default function AdminUsers() {
               onChange={(e) =>
                 setMessageForm({
                   ...messageForm,
-                  targetType: e.target.value,
+                  targetType: e.target.value as "ALL_USERS" | "ROLE" | "USER",
                   userId: e.target.value === "USER" ? selected?.id ?? messageForm.userId : "",
                 })
               }
             >
-              <MenuItem value="ALL_USERS">All users + resellers</MenuItem>
+              <MenuItem value="ALL_USERS">All users + admins</MenuItem>
               <MenuItem value="ROLE">Specific role</MenuItem>
               <MenuItem value="USER">Single user</MenuItem>
             </TextField>
@@ -586,11 +620,13 @@ export default function AdminUsers() {
                 select
                 label="Role"
                 value={messageForm.role}
-                onChange={(e) => setMessageForm({ ...messageForm, role: e.target.value })}
+                onChange={(e) => setMessageForm({ ...messageForm, role: e.target.value as AppRole })}
               >
-                <MenuItem value="USER">USER</MenuItem>
-                <MenuItem value="RESELLER">RESELLER</MenuItem>
-                <MenuItem value="ADMIN">ADMIN</MenuItem>
+                {roleOptions.map((role) => (
+                  <MenuItem key={`message-role-${role}`} value={role}>
+                    {getRoleLabel(role)}
+                  </MenuItem>
+                ))}
               </TextField>
             ) : null}
             {messageForm.targetType === "USER" ? (
@@ -611,7 +647,7 @@ export default function AdminUsers() {
               select
               label="Category"
               value={messageForm.category}
-              onChange={(e) => setMessageForm({ ...messageForm, category: e.target.value })}
+              onChange={(e) => setMessageForm({ ...messageForm, category: e.target.value as "UPDATE" | "BONUS" | "MESSAGE" })}
             >
               <MenuItem value="UPDATE">Update</MenuItem>
               <MenuItem value="BONUS">Bonus</MenuItem>
@@ -643,7 +679,7 @@ export default function AdminUsers() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={servicesOpen} onClose={() => setServicesOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={servicesOpen} onClose={() => setServicesOpen(false)} fullWidth fullScreen={isMobile} maxWidth="sm">
         <DialogTitle>Service Access {serviceAccessUser ? `• ${serviceAccessUser.email}` : ""}</DialogTitle>
         <DialogContent>
           <Stack spacing={1.25} sx={{ pt: 1 }}>
